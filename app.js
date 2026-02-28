@@ -14,51 +14,55 @@ const seenQuestions = { team1: new Set(), team2: new Set() };
 // ==========================================
 // PROCEDURAL QUESTION GENERATOR
 // ==========================================
-function generateQuestion(level) {
-    const ops = [];
+// difficulty: 1=easy, 2=normal, 3=hard (scales number ranges)
+function generateQuestion(level, difficulty = 2) {
     let a, b, text, answer;
+    // Scale factor: easy=0.6, normal=1.0, hard=1.5
+    const scale = difficulty === 1 ? 0.6 : difficulty === 3 ? 1.5 : 1.0;
+    const s = (n) => Math.max(2, Math.round(n * scale)); // scaled value, min 2
 
     switch (level) {
-        case '1-2': // 1°-2° Básico: sumas y restas < 20
+        case '1-2':
             if (Math.random() < 0.5) {
-                a = Math.floor(Math.random() * 15) + 1;
-                b = Math.floor(Math.random() * (20 - a)) + 1;
+                a = Math.floor(Math.random() * s(15)) + 1;
+                b = Math.floor(Math.random() * s(20 - a)) + 1;
                 text = `${a} + ${b} = ?`; answer = a + b;
             } else {
-                a = Math.floor(Math.random() * 15) + 5;
+                a = Math.floor(Math.random() * s(15)) + s(5);
                 b = Math.floor(Math.random() * a) + 1;
                 text = `${a} − ${b} = ?`; answer = a - b;
             }
             break;
 
-        case '3-4': // 3°-4° Básico: tablas de multiplicar, divisiones exactas
+        case '3-4': {
             const r34 = Math.random();
             if (r34 < 0.3) {
-                a = Math.floor(Math.random() * 9) + 2;
-                b = Math.floor(Math.random() * 9) + 2;
+                a = Math.floor(Math.random() * s(9)) + 2;
+                b = Math.floor(Math.random() * s(9)) + 2;
                 text = `${a} × ${b} = ?`; answer = a * b;
             } else if (r34 < 0.5) {
-                b = Math.floor(Math.random() * 9) + 2;
-                answer = Math.floor(Math.random() * 9) + 2;
+                b = Math.floor(Math.random() * s(9)) + 2;
+                answer = Math.floor(Math.random() * s(9)) + 2;
                 a = b * answer;
                 text = `${a} ÷ ${b} = ?`;
             } else if (r34 < 0.75) {
-                a = Math.floor(Math.random() * 80) + 10;
-                b = Math.floor(Math.random() * 50) + 10;
+                a = Math.floor(Math.random() * s(80)) + 10;
+                b = Math.floor(Math.random() * s(50)) + 10;
                 text = `${a} + ${b} = ?`; answer = a + b;
             } else {
-                a = Math.floor(Math.random() * 80) + 30;
+                a = Math.floor(Math.random() * s(80)) + 30;
                 b = Math.floor(Math.random() * (a - 5)) + 5;
                 text = `${a} − ${b} = ?`; answer = a - b;
             }
             break;
+        }
 
-        case '5-6': // 5°-6° Básico: operaciones combinadas, fracciones simples
+        case '5-6': {
             const r56 = Math.random();
             if (r56 < 0.35) {
-                a = Math.floor(Math.random() * 9) + 2;
-                b = Math.floor(Math.random() * 9) + 2;
-                const c = Math.floor(Math.random() * 20) + 1;
+                a = Math.floor(Math.random() * s(9)) + 2;
+                b = Math.floor(Math.random() * s(9)) + 2;
+                const c = Math.floor(Math.random() * s(20)) + 1;
                 if (Math.random() < 0.5) {
                     text = `${a} × ${b} + ${c} = ?`; answer = a * b + c;
                 } else {
@@ -68,7 +72,7 @@ function generateQuestion(level) {
                 const denominators = [2, 4, 5, 10];
                 b = denominators[Math.floor(Math.random() * denominators.length)];
                 a = Math.floor(Math.random() * (b - 1)) + 1;
-                const whole = Math.floor(Math.random() * 50) + 10;
+                const whole = Math.floor(Math.random() * s(50)) + 10;
                 answer = whole * a / b;
                 if (Number.isInteger(answer)) {
                     text = `${a}/${b} de ${whole} = ?`;
@@ -77,54 +81,56 @@ function generateQuestion(level) {
                     text = `${a}/${b} de ${w2} = ?`; answer = w2 / 2;
                 }
             } else {
-                a = Math.floor(Math.random() * 12) + 2;
-                b = Math.floor(Math.random() * 12) + 2;
+                a = Math.floor(Math.random() * s(12)) + 2;
+                b = Math.floor(Math.random() * s(12)) + 2;
                 text = `${a} × ${b} = ?`; answer = a * b;
             }
             break;
+        }
 
-        case '7-8': // 7°-8° Básico: ecuaciones, porcentajes
+        case '7-8': {
             const r78 = Math.random();
             if (r78 < 0.35) {
-                answer = Math.floor(Math.random() * 20) + 1;
-                b = Math.floor(Math.random() * 15) + 3;
-                a = Math.floor(Math.random() * 8) + 2;
+                answer = Math.floor(Math.random() * s(20)) + 1;
+                b = Math.floor(Math.random() * s(15)) + 3;
+                a = Math.floor(Math.random() * s(8)) + 2;
                 const result = a * answer + b;
                 text = `${a}x + ${b} = ${result}, x = ?`;
             } else if (r78 < 0.65) {
                 const percents = [10, 20, 25, 50, 75];
                 a = percents[Math.floor(Math.random() * percents.length)];
-                b = (Math.floor(Math.random() * 20) + 2) * (100 / a);
+                b = (Math.floor(Math.random() * s(20)) + 2) * (100 / a);
                 b = Math.round(b);
                 answer = Math.round(b * a / 100);
                 text = `${a}% de ${b} = ?`;
             } else {
-                a = Math.floor(Math.random() * 15) + 2;
-                b = Math.floor(Math.random() * 15) + 2;
+                a = Math.floor(Math.random() * s(15)) + 2;
+                b = Math.floor(Math.random() * s(15)) + 2;
                 answer = a * a + b;
                 text = `${a}² + ${b} = ?`;
             }
             break;
+        }
 
         default:
-            a = Math.floor(Math.random() * 9) + 2;
-            b = Math.floor(Math.random() * 9) + 2;
+            a = Math.floor(Math.random() * s(9)) + 2;
+            b = Math.floor(Math.random() * s(9)) + 2;
             text = `${a} × ${b} = ?`; answer = a * b;
     }
 
     return { text, answer: Math.round(answer) };
 }
 
-// Generate a unique question for a team (anti-repetition)
+// Generate a unique question for a team (anti-repetition + adaptive difficulty)
 function getUniqueQuestion(teamId) {
     const teamKey = `team${teamId}`;
+    const ts = gameStatus[teamKey];
     let attempts = 0;
     let q;
     do {
-        q = generateQuestion(selectedLevel);
+        q = generateQuestion(selectedLevel, ts ? ts.difficultyLevel : 2);
         attempts++;
         if (attempts > 50) {
-            // Clear history if we've generated too many to avoid infinite loop
             seenQuestions[teamKey].clear();
         }
     } while (seenQuestions[teamKey].has(q.text) && attempts < 60);
@@ -133,11 +139,13 @@ function getUniqueQuestion(teamId) {
 }
 
 const WINNING_SCORE = 10;
-const TURBO_TIME_MS = 3000; // Answer under 3s = turbo
-const SHIELD_STREAK = 5;    // Earn shield at streak 5
+const TURBO_TIME_MS = 3000;
+const SHIELD_STREAK = 5;
+const DIFF_UP_STREAK = 3;   // Consecutive correct to increase difficulty
+const DIFF_DOWN_MISS = 2;   // Consecutive incorrect to decrease difficulty
 const gameStatus = {
-    team1: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 },
-    team2: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 }
+    team1: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0, difficultyLevel: 2, consecutiveWrong: 0 },
+    team2: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0, difficultyLevel: 2, consecutiveWrong: 0 }
 };
 let gameStartTime = null;
 
@@ -233,8 +241,8 @@ async function initHostMode(is1v1 = false) {
     });
 
     // Reset game
-    gameStatus.team1 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 };
-    gameStatus.team2 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 };
+    gameStatus.team1 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0, difficultyLevel: 2, consecutiveWrong: 0 };
+    gameStatus.team2 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0, difficultyLevel: 2, consecutiveWrong: 0 };
     seenQuestions.team1.clear();
     seenQuestions.team2.clear();
     gameStartTime = null;
@@ -293,7 +301,13 @@ function handleHostData(teamId, data) {
             if (isTurbo) ts.turboCount += 1;
 
             ts.streak += 1;
+            ts.consecutiveWrong = 0; // Reset consecutive wrong on correct
             if (ts.streak > ts.bestStreak) ts.bestStreak = ts.streak;
+
+            // 📈 ADAPTIVE DIFFICULTY: increase at streak milestones
+            if (ts.streak > 0 && ts.streak % DIFF_UP_STREAK === 0 && ts.difficultyLevel < 3) {
+                ts.difficultyLevel += 1;
+            }
 
             // 🛡️ SHIELD: earned at streak 5
             let shieldEarned = false;
@@ -311,7 +325,8 @@ function handleHostData(teamId, data) {
                 turbo: isTurbo,
                 points: points,
                 shieldEarned: shieldEarned,
-                hasShield: ts.hasShield
+                hasShield: ts.hasShield,
+                difficulty: ts.difficultyLevel
             });
 
             if (ts.score >= WINNING_SCORE) {
@@ -342,6 +357,13 @@ function handleHostData(teamId, data) {
             }
             ts.streak = 0;
             ts.incorrect += 1;
+            ts.consecutiveWrong += 1;
+
+            // 📉 ADAPTIVE DIFFICULTY: decrease after consecutive wrong
+            if (ts.consecutiveWrong >= DIFF_DOWN_MISS && ts.difficultyLevel > 1) {
+                ts.difficultyLevel -= 1;
+                ts.consecutiveWrong = 0;
+            }
             updateStreakDisplay();
         }
     }
@@ -362,20 +384,24 @@ function updateAvatars() {
 // STREAK DISPLAY (🔥)
 // ==========================================
 function updateStreakDisplay() {
+    const diffLabels = { 1: '🟢', 2: '🟡', 3: '🔴' };
     [1, 2].forEach(id => {
-        const streak = gameStatus[`team${id}`].streak;
+        const ts = gameStatus[`team${id}`];
+        const streak = ts.streak;
         const el = document.getElementById(`streak-${id}`);
         if (!el) return;
+        const diffIcon = diffLabels[ts.difficultyLevel] || '🟡';
         if (streak >= 2) {
             let fires = '🔥';
             if (streak >= 7) fires = '🔥🔥🔥';
             else if (streak >= 5) fires = '🔥🔥';
-            el.innerText = `${fires} ×${streak}`;
+            el.innerText = `${fires}×${streak} ${diffIcon}`;
             el.classList.remove('hidden');
             el.classList.add('streak-pop');
             setTimeout(() => el.classList.remove('streak-pop'), 400);
         } else {
-            el.classList.add('hidden');
+            el.innerText = diffIcon;
+            el.classList.remove('hidden');
         }
     });
 }
