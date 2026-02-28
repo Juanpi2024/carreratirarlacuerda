@@ -363,9 +363,18 @@ h1 {
 }
 
 #answer-input {
-    flex: 0 0 80px;
+    flex: 1;
     border-color: var(--frost);
     max-width: none;
+    margin: 0;
+    height: 100%;
+}
+
+.input-row {
+    display: flex;
+    gap: 10px;
+    height: 80px;
+    flex: 0 0 80px;
 }
 
 .numpad-grid {
@@ -395,10 +404,23 @@ h1 {
 }
 
 .btn-submit {
-    grid-column: span 2;
+    flex: 0 0 130px;
     background: linear-gradient(to right, var(--accent-green), #00c6ff) !important;
     border-color: var(--accent-green) !important;
     box-shadow: 0 4px 0 #005f00 !important;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: bold;
+    border-radius: 12px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.1s;
+    border: 2px solid var(--frost);
+}
+
+.btn-submit:active {
+    transform: translateY(4px);
+    box-shadow: none !important;
 }
 
 .freeze-overlay {
