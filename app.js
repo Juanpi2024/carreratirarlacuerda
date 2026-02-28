@@ -7,6 +7,8 @@ let roomCode = '';
 let connections = {}; // For HOST to track buzzers
 let currentConnection = null; // For BUZZER to track host
 
+let gameQuestions = []; // Will be populated by GAS or mockups.
+
 // Mock questions for Phase 1 (Before GAS integration)
 const mockupQuestions = [
     { text: "7 x 8 = ?", answer: 56 },
@@ -63,11 +65,32 @@ function generateRoomCode() {
 // ==========================================
 // HOST LOGIC (Main Screen)
 // ==========================================
-function initHostMode(is1v1 = false) {
+async function initHostMode(is1v1 = false) {
     role = 'HOST';
+
+    // UI Loading state
+    document.getElementById('display-room-code').innerText = "Cargando Preguntas...";
+    showScreen('host-screen');
+
+    // Attempt to load questions from GAS
+    try {
+        if (typeof fetchQuestionsFromGAS === "function") {
+            const fetchedQ = await fetchQuestionsFromGAS();
+            if (fetchedQ && fetchedQ.length > 5) {
+                gameQuestions = fetchedQ;
+            } else {
+                gameQuestions = mockupQuestions; // Fallback
+            }
+        } else {
+            gameQuestions = mockupQuestions;
+        }
+    } catch (e) {
+        console.warn("GAS load failed using mockups");
+        gameQuestions = mockupQuestions;
+    }
+
     roomCode = generateRoomCode();
     document.getElementById('display-room-code').innerText = roomCode;
-    showScreen('host-screen');
 
     if (is1v1) {
         document.getElementById('split-board-container').classList.remove('hidden');
@@ -122,11 +145,11 @@ function updateConnectionCount() {
 }
 
 function sendQuestionToTeam(teamId) {
-    if (connections[teamId]) {
+    if (connections[teamId] && gameQuestions.length > 0) {
         const teamState = gameStatus[`team${teamId}`];
         // Loop questions if we run out
-        const qIndex = teamState.currentQuestionIndex % mockupQuestions.length;
-        const q = mockupQuestions[qIndex];
+        const qIndex = teamState.currentQuestionIndex % gameQuestions.length;
+        const q = gameQuestions[qIndex];
 
         connections[teamId].send({
             type: 'NEW_QUESTION',
@@ -142,10 +165,10 @@ function sendQuestionToTeam(teamId) {
 }
 
 function handleHostReceivedData(teamId, data) {
-    if (data.type === 'ANSWER_SUBMIT') {
+    if (data.type === 'ANSWER_SUBMIT' && gameQuestions.length > 0) {
         const teamState = gameStatus[`team${teamId}`];
-        const qIndex = teamState.currentQuestionIndex % mockupQuestions.length;
-        const correctAnswer = mockupQuestions[qIndex].answer;
+        const qIndex = teamState.currentQuestionIndex % gameQuestions.length;
+        const correctAnswer = gameQuestions[qIndex].answer;
         const submittedAnswer = parseInt(data.value);
 
         if (submittedAnswer === correctAnswer) {
@@ -160,6 +183,11 @@ function handleHostReceivedData(teamId, data) {
                 alert(`¡EL EQUIPO ${teamId} HA GANADO LA CARRERA!`);
                 // Broadcast win to all
                 Object.values(connections).forEach(c => c.send({ type: 'GAME_OVER', winner: teamId }));
+
+                // Send metrics to GAS
+                if (typeof sendMetricsToGAS === "function") {
+                    sendMetricsToGAS(teamId, "Victoria");
+                }
             } else {
                 // Send next
                 sendQuestionToTeam(teamId);
@@ -168,7 +196,7 @@ function handleHostReceivedData(teamId, data) {
             // INCORRECT
             connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
             // Give them a different question after freeze
-            teamState.currentQuestionIndex = Math.floor(Math.random() * mockupQuestions.length);
+            teamState.currentQuestionIndex = Math.floor(Math.random() * gameQuestions.length);
         }
     }
 }
