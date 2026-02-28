@@ -133,9 +133,11 @@ function getUniqueQuestion(teamId) {
 }
 
 const WINNING_SCORE = 10;
+const TURBO_TIME_MS = 3000; // Answer under 3s = turbo
+const SHIELD_STREAK = 5;    // Earn shield at streak 5
 const gameStatus = {
-    team1: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0 },
-    team2: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0 }
+    team1: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 },
+    team2: { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 }
 };
 let gameStartTime = null;
 
@@ -231,8 +233,8 @@ async function initHostMode(is1v1 = false) {
     });
 
     // Reset game
-    gameStatus.team1 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0 };
-    gameStatus.team2 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0 };
+    gameStatus.team1 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 };
+    gameStatus.team2 = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0 };
     seenQuestions.team1.clear();
     seenQuestions.team2.clear();
     gameStartTime = null;
@@ -281,14 +283,36 @@ function handleHostData(teamId, data) {
 
         if (submitted === correct) {
             // Track answer time
-            if (ts.lastQuestionTime) ts.totalAnswerTimeMs += (Date.now() - ts.lastQuestionTime);
-            ts.score += 1;
+            const answerMs = ts.lastQuestionTime ? (Date.now() - ts.lastQuestionTime) : 9999;
+            ts.totalAnswerTimeMs += answerMs;
+
+            // ⚡ TURBO: answer under 3s = +2
+            const isTurbo = answerMs < TURBO_TIME_MS;
+            const points = isTurbo ? 2 : 1;
+            ts.score = Math.min(ts.score + points, WINNING_SCORE);
+            if (isTurbo) ts.turboCount += 1;
+
             ts.streak += 1;
             if (ts.streak > ts.bestStreak) ts.bestStreak = ts.streak;
+
+            // 🛡️ SHIELD: earned at streak 5
+            let shieldEarned = false;
+            if (ts.streak === SHIELD_STREAK && !ts.hasShield) {
+                ts.hasShield = true;
+                shieldEarned = true;
+            }
+
             updateAvatars();
             updateScoreDisplay();
             updateStreakDisplay();
-            connections[teamId].send({ type: 'CORRECT', streak: ts.streak });
+            connections[teamId].send({
+                type: 'CORRECT',
+                streak: ts.streak,
+                turbo: isTurbo,
+                points: points,
+                shieldEarned: shieldEarned,
+                hasShield: ts.hasShield
+            });
 
             if (ts.score >= WINNING_SCORE) {
                 // VICTORY!
@@ -307,11 +331,18 @@ function handleHostData(teamId, data) {
                 sendQuestionToTeam(teamId);
             }
         } else {
-            connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
+            // 🛡️ SHIELD: blocks freeze
+            if (ts.hasShield) {
+                ts.hasShield = false;
+                connections[teamId].send({ type: 'SHIELD_USED' });
+                // No freeze, just send new question
+                sendQuestionToTeam(teamId);
+            } else {
+                connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
+            }
             ts.streak = 0;
             ts.incorrect += 1;
             updateStreakDisplay();
-            // After freeze, buzzer will request a new question
         }
     }
 }
@@ -375,6 +406,7 @@ function showVictory(teamId, timeStr) {
                         <div class="stat-row"><span class="stat-label">❌ Incorrectas</span><span class="stat-value">${ts.incorrect}</span></div>
                         <div class="stat-row"><span class="stat-label">🎯 Precisión</span><span class="stat-value">${accuracy}%</span></div>
                         <div class="stat-row"><span class="stat-label">🔥 Mejor racha</span><span class="stat-value">${ts.bestStreak}</span></div>
+                        <div class="stat-row"><span class="stat-label">⚡ Turbos</span><span class="stat-value">${ts.turboCount}</span></div>
                         <div class="stat-row"><span class="stat-label">⏱️ Promedio</span><span class="stat-value">${avgTime}s</span></div>
                     </div>
                 </div>`;
@@ -478,14 +510,71 @@ function joinRoom() {
             }
             if (data.type === 'CORRECT') {
                 showCorrectFlash();
-                // Show streak on buzzer
+                const th = document.getElementById('buzzer-team-name');
+                let headerText = `EQUIPO ${buzzerTeamId}`;
+
+                // Show turbo flash
+                if (data.turbo) {
+                    headerText = `⚡ TURBO! +${data.points} ⚡`;
+                    th.style.background = 'linear-gradient(90deg, #ff9100, #ffd700)';
+                    th.style.color = '#000';
+                    setTimeout(() => {
+                        th.style.background = '';
+                        th.style.color = '';
+                    }, 1200);
+                }
+
+                // Show shield earned
+                if (data.shieldEarned) {
+                    setTimeout(() => {
+                        th.innerText = '🛡️ ¡ESCUDO ACTIVADO! 🛡️';
+                        th.style.background = 'linear-gradient(90deg, #00b4ff, #00e5ff)';
+                        th.style.color = '#000';
+                        setTimeout(() => {
+                            th.style.background = '';
+                            th.style.color = '';
+                            th.innerText = `EQUIPO ${buzzerTeamId} 🛡️`;
+                        }, 1500);
+                    }, data.turbo ? 1300 : 0);
+                }
+
+                // Show streak + shield indicator
                 if (data.streak && data.streak >= 2) {
                     let fires = '🔥';
                     if (data.streak >= 7) fires = '🔥🔥🔥';
                     else if (data.streak >= 5) fires = '🔥🔥';
-                    const th = document.getElementById('buzzer-team-name');
-                    th.innerText = `EQUIPO ${buzzerTeamId} ${fires}×${data.streak}`;
+                    headerText = `EQUIPO ${buzzerTeamId} ${fires}×${data.streak}`;
+                    if (data.hasShield) headerText += ' 🛡️';
                 }
+
+                if (!data.turbo && !data.shieldEarned) {
+                    th.innerText = headerText;
+                } else if (!data.shieldEarned) {
+                    th.innerText = headerText;
+                    setTimeout(() => {
+                        let restoreText = `EQUIPO ${buzzerTeamId}`;
+                        if (data.streak >= 2) {
+                            let f = '🔥';
+                            if (data.streak >= 7) f = '🔥🔥🔥';
+                            else if (data.streak >= 5) f = '🔥🔥';
+                            restoreText += ` ${f}×${data.streak}`;
+                        }
+                        if (data.hasShield) restoreText += ' 🛡️';
+                        th.innerText = restoreText;
+                    }, 1200);
+                }
+            }
+            if (data.type === 'SHIELD_USED') {
+                // Shield blocked the freeze!
+                const th = document.getElementById('buzzer-team-name');
+                th.innerText = '🛡️ ¡ESCUDO USADO! ¡SALVADO! 🛡️';
+                th.style.background = 'linear-gradient(90deg, #39ff14, #00e5ff)';
+                th.style.color = '#000';
+                setTimeout(() => {
+                    th.style.background = '';
+                    th.style.color = '';
+                    th.innerText = `EQUIPO ${buzzerTeamId}`;
+                }, 2000);
             }
             if (data.type === 'FREEZE_PENALTY') {
                 applyFreeze(data.seconds);
