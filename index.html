@@ -25,6 +25,14 @@
                 <h1 class="glitch-title" data-text="MATH RACE">MATH RACE</h1>
                 <h2 class="subtitle">⚡ Carrera Matemática Espacial ⚡</h2>
                 <div class="menu-options">
+                    <label class="level-label">📚 Nivel Educativo</label>
+                    <select id="level-selector" class="huge-input level-select">
+                        <option value="1-2">🟢 1° a 2° Básico (Sumas y restas simples)</option>
+                        <option value="3-4" selected>🔵 3° a 4° Básico (Tablas, divisiones)</option>
+                        <option value="5-6">🟣 5° a 6° Básico (Operaciones combinadas)</option>
+                        <option value="7-8">🔴 7° a 8° Básico (Ecuaciones, porcentajes)</option>
+                    </select>
+                    <div class="menu-divider"></div>
                     <button class="btn btn-primary pulse-btn" onclick="initHostMode(false)">🖥️ Pantalla Principal
                         (Relevos)</button>
                     <button class="btn btn-primary pulse-btn" onclick="initHostMode(true)">⚔️ Pantalla Principal (1 vs

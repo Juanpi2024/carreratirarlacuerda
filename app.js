@@ -6,36 +6,136 @@ let peer = null;
 let roomCode = '';
 let connections = {};
 let currentConnection = null;
-let gameQuestions = [];
+let selectedLevel = '3-4'; // Default level
 
-// Mock questions for offline testing
-const mockupQuestions = [
-    { text: "7 × 8 = ?", answer: 56 },
-    { text: "45 + 17 = ?", answer: 62 },
-    { text: "100 − 25 = ?", answer: 75 },
-    { text: "9 × 9 = ?", answer: 81 },
-    { text: "30 ÷ 5 = ?", answer: 6 },
-    { text: "12 + 18 = ?", answer: 30 },
-    { text: "6 × 7 = ?", answer: 42 },
-    { text: "50 − 15 = ?", answer: 35 },
-    { text: "8 × 4 = ?", answer: 32 },
-    { text: "100 ÷ 10 = ?", answer: 10 },
-    { text: "¿Mitad de 50?", answer: 25 },
-    { text: "6 × 6 = ?", answer: 36 },
-    { text: "3 × 12 = ?", answer: 36 },
-    { text: "48 ÷ 6 = ?", answer: 8 },
-    { text: "99 − 33 = ?", answer: 66 },
-    { text: "25 + 37 = ?", answer: 62 },
-    { text: "11 × 4 = ?", answer: 44 },
-    { text: "72 ÷ 8 = ?", answer: 9 },
-    { text: "150 − 80 = ?", answer: 70 },
-    { text: "5 × 5 × 2 = ?", answer: 50 }
-];
+// Anti-repetition: tracks question hashes seen by each team
+const seenQuestions = { team1: new Set(), team2: new Set() };
+
+// ==========================================
+// PROCEDURAL QUESTION GENERATOR
+// ==========================================
+function generateQuestion(level) {
+    const ops = [];
+    let a, b, text, answer;
+
+    switch (level) {
+        case '1-2': // 1°-2° Básico: sumas y restas < 20
+            if (Math.random() < 0.5) {
+                a = Math.floor(Math.random() * 15) + 1;
+                b = Math.floor(Math.random() * (20 - a)) + 1;
+                text = `${a} + ${b} = ?`; answer = a + b;
+            } else {
+                a = Math.floor(Math.random() * 15) + 5;
+                b = Math.floor(Math.random() * a) + 1;
+                text = `${a} − ${b} = ?`; answer = a - b;
+            }
+            break;
+
+        case '3-4': // 3°-4° Básico: tablas de multiplicar, divisiones exactas
+            const r34 = Math.random();
+            if (r34 < 0.3) {
+                a = Math.floor(Math.random() * 9) + 2;
+                b = Math.floor(Math.random() * 9) + 2;
+                text = `${a} × ${b} = ?`; answer = a * b;
+            } else if (r34 < 0.5) {
+                b = Math.floor(Math.random() * 9) + 2;
+                answer = Math.floor(Math.random() * 9) + 2;
+                a = b * answer;
+                text = `${a} ÷ ${b} = ?`;
+            } else if (r34 < 0.75) {
+                a = Math.floor(Math.random() * 80) + 10;
+                b = Math.floor(Math.random() * 50) + 10;
+                text = `${a} + ${b} = ?`; answer = a + b;
+            } else {
+                a = Math.floor(Math.random() * 80) + 30;
+                b = Math.floor(Math.random() * (a - 5)) + 5;
+                text = `${a} − ${b} = ?`; answer = a - b;
+            }
+            break;
+
+        case '5-6': // 5°-6° Básico: operaciones combinadas, fracciones simples
+            const r56 = Math.random();
+            if (r56 < 0.35) {
+                a = Math.floor(Math.random() * 9) + 2;
+                b = Math.floor(Math.random() * 9) + 2;
+                const c = Math.floor(Math.random() * 20) + 1;
+                if (Math.random() < 0.5) {
+                    text = `${a} × ${b} + ${c} = ?`; answer = a * b + c;
+                } else {
+                    text = `${a} × ${b} − ${c} = ?`; answer = a * b - c;
+                }
+            } else if (r56 < 0.6) {
+                const denominators = [2, 4, 5, 10];
+                b = denominators[Math.floor(Math.random() * denominators.length)];
+                a = Math.floor(Math.random() * (b - 1)) + 1;
+                const whole = Math.floor(Math.random() * 50) + 10;
+                answer = whole * a / b;
+                if (Number.isInteger(answer)) {
+                    text = `${a}/${b} de ${whole} = ?`;
+                } else {
+                    a = 1; b = 2; const w2 = (Math.floor(Math.random() * 25) + 5) * 2;
+                    text = `${a}/${b} de ${w2} = ?`; answer = w2 / 2;
+                }
+            } else {
+                a = Math.floor(Math.random() * 12) + 2;
+                b = Math.floor(Math.random() * 12) + 2;
+                text = `${a} × ${b} = ?`; answer = a * b;
+            }
+            break;
+
+        case '7-8': // 7°-8° Básico: ecuaciones, porcentajes
+            const r78 = Math.random();
+            if (r78 < 0.35) {
+                answer = Math.floor(Math.random() * 20) + 1;
+                b = Math.floor(Math.random() * 15) + 3;
+                a = Math.floor(Math.random() * 8) + 2;
+                const result = a * answer + b;
+                text = `${a}x + ${b} = ${result}, x = ?`;
+            } else if (r78 < 0.65) {
+                const percents = [10, 20, 25, 50, 75];
+                a = percents[Math.floor(Math.random() * percents.length)];
+                b = (Math.floor(Math.random() * 20) + 2) * (100 / a);
+                b = Math.round(b);
+                answer = Math.round(b * a / 100);
+                text = `${a}% de ${b} = ?`;
+            } else {
+                a = Math.floor(Math.random() * 15) + 2;
+                b = Math.floor(Math.random() * 15) + 2;
+                answer = a * a + b;
+                text = `${a}² + ${b} = ?`;
+            }
+            break;
+
+        default:
+            a = Math.floor(Math.random() * 9) + 2;
+            b = Math.floor(Math.random() * 9) + 2;
+            text = `${a} × ${b} = ?`; answer = a * b;
+    }
+
+    return { text, answer: Math.round(answer) };
+}
+
+// Generate a unique question for a team (anti-repetition)
+function getUniqueQuestion(teamId) {
+    const teamKey = `team${teamId}`;
+    let attempts = 0;
+    let q;
+    do {
+        q = generateQuestion(selectedLevel);
+        attempts++;
+        if (attempts > 50) {
+            // Clear history if we've generated too many to avoid infinite loop
+            seenQuestions[teamKey].clear();
+        }
+    } while (seenQuestions[teamKey].has(q.text) && attempts < 60);
+    seenQuestions[teamKey].add(q.text);
+    return q;
+}
 
 const WINNING_SCORE = 10;
 const gameStatus = {
-    team1: { score: 0, currentQuestionIndex: 0 },
-    team2: { score: 0, currentQuestionIndex: 0 }
+    team1: { score: 0, currentQuestion: null },
+    team2: { score: 0, currentQuestion: null }
 };
 let gameStartTime = null;
 
@@ -51,11 +151,13 @@ function goLobby() {
     if (peer) { peer.destroy(); peer = null; }
     role = null;
     connections = {};
-    // Reset scores
+    // Reset scores and seen questions
     gameStatus.team1.score = 0;
     gameStatus.team2.score = 0;
-    gameStatus.team1.currentQuestionIndex = 0;
-    gameStatus.team2.currentQuestionIndex = 0;
+    gameStatus.team1.currentQuestion = null;
+    gameStatus.team2.currentQuestion = null;
+    seenQuestions.team1.clear();
+    seenQuestions.team2.clear();
     // Hide victory
     const vo = document.getElementById('victory-overlay');
     if (vo) { vo.classList.add('hidden'); vo.classList.remove('active'); }
@@ -78,26 +180,11 @@ function generateRoomCode() {
 async function initHostMode(is1v1 = false) {
     role = 'HOST';
     showScreen('host-screen');
-    document.getElementById('display-room-code').innerText = "CARGANDO...";
+    document.getElementById('display-room-code').innerText = "PREPARANDO...";
 
-    // Load questions
-    try {
-        if (typeof fetchQuestionsFromGAS === "function") {
-            const fetched = await fetchQuestionsFromGAS();
-            gameQuestions = (fetched && fetched.length > 5) ? fetched : mockupQuestions;
-        } else {
-            gameQuestions = mockupQuestions;
-        }
-    } catch (e) {
-        console.warn("GAS failed, using mockups");
-        gameQuestions = mockupQuestions;
-    }
-
-    // Shuffle questions
-    for (let i = gameQuestions.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [gameQuestions[i], gameQuestions[j]] = [gameQuestions[j], gameQuestions[i]];
-    }
+    // Read selected level from lobby
+    const levelSelect = document.getElementById('level-selector');
+    if (levelSelect) selectedLevel = levelSelect.value;
 
     roomCode = generateRoomCode();
     document.getElementById('display-room-code').innerText = roomCode;
@@ -136,8 +223,10 @@ async function initHostMode(is1v1 = false) {
     });
 
     // Reset game
-    gameStatus.team1 = { score: 0, currentQuestionIndex: 0 };
-    gameStatus.team2 = { score: 0, currentQuestionIndex: 1 };
+    gameStatus.team1 = { score: 0, currentQuestion: null };
+    gameStatus.team2 = { score: 0, currentQuestion: null };
+    seenQuestions.team1.clear();
+    seenQuestions.team2.clear();
     gameStartTime = null;
     updateAvatars();
     updateScoreDisplay();
@@ -159,10 +248,10 @@ function updateScoreDisplay() {
 }
 
 function sendQuestionToTeam(teamId) {
-    if (connections[teamId] && gameQuestions.length > 0) {
+    if (connections[teamId]) {
         const ts = gameStatus[`team${teamId}`];
-        const qi = ts.currentQuestionIndex % gameQuestions.length;
-        const q = gameQuestions[qi];
+        const q = getUniqueQuestion(teamId);
+        ts.currentQuestion = q;
         connections[teamId].send({ type: 'NEW_QUESTION', text: q.text });
         // Update host split board
         const el = document.getElementById(`host-question-${teamId}`);
@@ -175,15 +264,14 @@ function handleHostData(teamId, data) {
         sendQuestionToTeam(teamId);
         return;
     }
-    if (data.type === 'ANSWER_SUBMIT' && gameQuestions.length > 0) {
+    if (data.type === 'ANSWER_SUBMIT') {
         const ts = gameStatus[`team${teamId}`];
-        const qi = ts.currentQuestionIndex % gameQuestions.length;
-        const correct = gameQuestions[qi].answer;
+        if (!ts.currentQuestion) return;
+        const correct = ts.currentQuestion.answer;
         const submitted = parseInt(data.value);
 
         if (submitted === correct) {
             ts.score += 1;
-            ts.currentQuestionIndex += 1;
             updateAvatars();
             updateScoreDisplay();
             connections[teamId].send({ type: 'CORRECT' });
@@ -206,8 +294,7 @@ function handleHostData(teamId, data) {
             }
         } else {
             connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
-            // New random question after penalty
-            ts.currentQuestionIndex = Math.floor(Math.random() * gameQuestions.length);
+            // After freeze, buzzer will request a new question
         }
     }
 }
