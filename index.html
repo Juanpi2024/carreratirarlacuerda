@@ -25,6 +25,10 @@
                 <h1 class="glitch-title" data-text="MATH RACE">MATH RACE</h1>
                 <h2 class="subtitle">⚡ Carrera Matemática Espacial ⚡</h2>
                 <div class="menu-options">
+                    <label class="level-label">📚 Asignatura</label>
+                    <select id="subject-selector" class="huge-input level-select">
+                        <option value="matematicas" selected>🔢 Matemáticas</option>
+                    </select>
                     <label class="level-label">📚 Nivel Educativo</label>
                     <select id="level-selector" class="huge-input level-select">
                         <option value="1-2">🟢 1° a 2° Básico (Sumas y restas simples)</option>
@@ -211,7 +215,8 @@
                 <div id="countdown-container" class="countdown-container hidden">
                     <div id="countdown-bar" class="countdown-fill"></div>
                 </div>
-                <div id="countdown-urgent" class="countdown-urgent-display hidden">⏱️ <span id="countdown-number">10</span></div>
+                <div id="countdown-urgent" class="countdown-urgent-display hidden">⏱️ <span
+                        id="countdown-number">10</span></div>
                 <div class="buzzer-question" id="buzzer-question-display">Preparado...</div>
 
                 <!-- ANSWER BAR: INPUT + ENVIAR — ALWAYS VISIBLE -->
@@ -260,6 +265,7 @@
 
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="gas_connector.js"></script>
+    <script src="questions/matematicas.js"></script>
     <script src="app.js"></script>
 </body>
 
