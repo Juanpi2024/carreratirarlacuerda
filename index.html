@@ -26,8 +26,12 @@
                 <h2 class="subtitle">⚡ Carrera Matemática Espacial ⚡</h2>
                 <div class="menu-options">
                     <label class="level-label">📚 Asignatura</label>
-                    <select id="subject-selector" class="huge-input level-select">
+                    <select id="subject-selector" class="huge-input level-select" title="Selecciona la asignatura">
                         <option value="matematicas" selected>🔢 Matemáticas</option>
+                        <option value="lenguaje">📖 Lenguaje</option>
+                        <option value="ciencias">🔬 Ciencias Naturales</option>
+                        <option value="historia">🌍 Historia y Geografía</option>
+                        <option value="ingles">🇬🇧 Inglés</option>
                     </select>
                     <label class="level-label">📚 Nivel Educativo</label>
                     <select id="level-selector" class="huge-input level-select">
@@ -225,8 +229,8 @@
                     <button class="send-btn" onclick="submitAnswer()">ENVIAR ➤</button>
                 </div>
 
-                <!-- NUMPAD -->
-                <div class="numpad-grid">
+                <!-- NUMPAD (for numeric answers) -->
+                <div id="numpad-container" class="numpad-grid">
                     <button class="num-key" onclick="appendNum(1)">1</button>
                     <button class="num-key" onclick="appendNum(2)">2</button>
                     <button class="num-key" onclick="appendNum(3)">3</button>
@@ -239,6 +243,18 @@
                     <button class="num-key key-clear" onclick="clearNum()">⌫</button>
                     <button class="num-key key-zero" onclick="appendNum(0)">0</button>
                     <button class="num-key key-neg" onclick="appendNeg()">−</button>
+                </div>
+
+                <!-- MULTIPLE CHOICE (for non-numeric answers) -->
+                <div id="options-container" class="options-grid hidden">
+                    <button class="option-btn" onclick="submitOption(1)"><span class="option-num">1</span><span
+                            id="opt-text-1" class="option-text"></span></button>
+                    <button class="option-btn" onclick="submitOption(2)"><span class="option-num">2</span><span
+                            id="opt-text-2" class="option-text"></span></button>
+                    <button class="option-btn" onclick="submitOption(3)"><span class="option-num">3</span><span
+                            id="opt-text-3" class="option-text"></span></button>
+                    <button class="option-btn" onclick="submitOption(4)"><span class="option-num">4</span><span
+                            id="opt-text-4" class="option-text"></span></button>
                 </div>
 
                 <!-- Freeze overlay -->
@@ -266,6 +282,10 @@
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="gas_connector.js"></script>
     <script src="questions/matematicas.js"></script>
+    <script src="questions/lenguaje.js"></script>
+    <script src="questions/ciencias.js"></script>
+    <script src="questions/historia.js"></script>
+    <script src="questions/ingles.js"></script>
     <script src="app.js"></script>
 </body>
 

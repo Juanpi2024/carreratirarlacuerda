@@ -188,7 +188,12 @@ function sendQuestionToTeam(teamId) {
         if (questionTimers[teamId]) clearTimeout(questionTimers[teamId]);
         // Start new anti-pegado timer
         questionTimers[teamId] = setTimeout(() => handleQuestionTimeout(teamId), QUESTION_TIMEOUT_S * 1000);
-        connections[teamId].send({ type: 'NEW_QUESTION', text: q.text, timeLimit: QUESTION_TIMEOUT_S });
+        // Get answer type from module
+        const mod = window.QuestionModules[selectedSubject];
+        const answerType = mod ? mod.answerType : 'numeric';
+        const payload = { type: 'NEW_QUESTION', text: q.text, timeLimit: QUESTION_TIMEOUT_S, answerType: answerType };
+        if (q.options) payload.options = q.options;
+        connections[teamId].send(payload);
         // Update host split board
         const el = document.getElementById(`host-question-${teamId}`);
         if (el) el.innerText = q.text;
@@ -511,6 +516,23 @@ function joinRoom() {
                 document.getElementById('buzzer-question-display').innerText = data.text;
                 clearNum();
                 startBuzzerCountdown(data.timeLimit || QUESTION_TIMEOUT_S);
+                // Switch between numpad and multiple-choice
+                const numpad = document.getElementById('numpad-container');
+                const optionsEl = document.getElementById('options-container');
+                const answerBar = document.querySelector('.answer-bar');
+                if (data.answerType === 'multiple-choice' && data.options) {
+                    numpad.classList.add('hidden');
+                    answerBar.classList.add('hidden');
+                    optionsEl.classList.remove('hidden');
+                    data.options.forEach((opt, i) => {
+                        const el = document.getElementById(`opt-text-${i + 1}`);
+                        if (el) el.innerText = opt;
+                    });
+                } else {
+                    numpad.classList.remove('hidden');
+                    answerBar.classList.remove('hidden');
+                    optionsEl.classList.add('hidden');
+                }
             }
             if (data.type === 'CORRECT') {
                 stopBuzzerCountdown();
@@ -643,6 +665,11 @@ function submitAnswer() {
     const inp = getAnswerInput();
     if (!inp.value || !currentConnection) return;
     currentConnection.send({ type: 'ANSWER_SUBMIT', value: inp.value });
+}
+
+function submitOption(num) {
+    if (!currentConnection) return;
+    currentConnection.send({ type: 'ANSWER_SUBMIT', value: String(num) });
 }
 
 // ==========================================

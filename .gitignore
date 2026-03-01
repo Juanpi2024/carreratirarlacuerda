@@ -1,0 +1,13 @@
+# Generated question banks
+generate/node_modules/
+node_modules/
+package.json
+package-lock.json
+
+# Environment / secrets
+.env
+generate/.env
+
+# OS files
+.DS_Store
+Thumbs.db
