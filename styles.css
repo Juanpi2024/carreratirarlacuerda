@@ -146,6 +146,7 @@ h3 {
 #lobby-screen {
     overflow-y: auto;
     padding: 2rem 0;
+    justify-content: flex-start;
 }
 
 .lobby-bg {
@@ -188,6 +189,10 @@ h3 {
     position: relative;
     z-index: 1;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
 }
 
 .lobby-logo {
