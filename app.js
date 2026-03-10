@@ -123,7 +123,20 @@ async function initHostMode(is1v1 = false) {
             connections[teamId] = conn;
             // Initialize new player if not exists
             if (!gameStatus[teamId]) {
-                gameStatus[teamId] = { score: 0, currentQuestion: null, streak: 0, bestStreak: 0, incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0, hasShield: false, turboCount: 0, difficultyLevel: 2, consecutiveWrong: 0 };
+                gameStatus[teamId] = {
+                    score: 0,
+                    currentQuestion: null,
+                    streak: 0,
+                    bestStreak: 0,
+                    incorrect: 0,
+                    totalAnswerTimeMs: 0,
+                    lastQuestionTime: 0,
+                    hasShield: false,
+                    turboCount: 0,
+                    difficultyLevel: 2,
+                    consecutiveWrong: 0,
+                    errorDetails: []
+                };
                 seenQuestions[teamId] = new Set();
                 createPlayerTrack(teamId);
             }
@@ -330,6 +343,15 @@ function handleHostData(teamId, data) {
             } else {
                 connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
             }
+
+            // Log specific error
+            ts.errorDetails.push({
+                question: ts.currentQuestion.text,
+                expected: correct,
+                submitted: submitted,
+                timeSpentMs: ts.lastQuestionTime ? (Date.now() - ts.lastQuestionTime) : 0
+            });
+
             ts.streak = 0;
             ts.incorrect += 1;
             ts.consecutiveWrong += 1;
@@ -441,11 +463,20 @@ function showVictory(teamId, timeStr) {
                     <div class="summary-team">${isWinner ? '🏆 ' : ''}${tId}</div>
                     <div class="summary-stats">
                         <div class="stat-row"><span class="stat-label">✅ Correctas</span><span class="stat-value">${ts.score}</span></div>
-                        <div class="stat-row"><span class="stat-label">❌ Incorrectas</span><span class="stat-value">${ts.incorrect}</span></div>
+                        <div class="stat-row" style="cursor: pointer;" onclick="document.getElementById('report-${ts.uiId}').classList.toggle('hidden')"><span class="stat-label">❌ Incorrectas (Click Ver Detalles)</span><span class="stat-value">${ts.incorrect}</span></div>
                         <div class="stat-row"><span class="stat-label">🎯 Precisión</span><span class="stat-value">${accuracy}%</span></div>
                         <div class="stat-row"><span class="stat-label">🔥 Mejor racha</span><span class="stat-value">${ts.bestStreak}</span></div>
                         <div class="stat-row"><span class="stat-label">⚡ Turbos</span><span class="stat-value">${ts.turboCount}</span></div>
                         <div class="stat-row"><span class="stat-label">⏱️ Promedio</span><span class="stat-value">${avgTime}s</span></div>
+                    </div>
+                    <div id="report-${ts.uiId}" class="error-report hidden">
+                        ${ts.errorDetails.length > 0 ? ts.errorDetails.map(err =>
+                `<div class="error-item">
+                                <b>P:</b> ${err.question}<br>
+                                Su respuesta: <span style="color:#ff4444">${err.submitted || 'Nada'}</span> | Correcta: <span style="color:#39ff14">${err.expected}</span><br>
+                                <small>⏱️ Tardó ${(err.timeSpentMs / 1000).toFixed(1)}s</small>
+                            </div>`
+            ).join('') : '<i>¡Perfecto! No hubo errores.</i>'}
                     </div>
                 </div>`;
         }

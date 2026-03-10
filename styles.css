@@ -1679,6 +1679,36 @@ h3 {
     flex-wrap: wrap;
 }
 
+.error-report {
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 8px;
+    padding: 0.8rem;
+    margin-top: 1rem;
+    text-align: left;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.error-report::-webkit-scrollbar {
+    width: 6px;
+}
+
+.error-report::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+}
+
+.error-item {
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+    padding: 0.5rem 0;
+}
+
+.error-item:last-child {
+    border-bottom: none;
+}
+
 .summary-card {
     flex: 1;
     min-width: 250px;
