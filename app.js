@@ -221,7 +221,7 @@ function updateScoreDisplay() {
 
 function sendQuestionToTeam(teamId) {
     if (connections[teamId]) {
-        const ts = gameStatus[`team${teamId}`];
+        const ts = gameStatus[teamId];
         const q = getUniqueQuestion(teamId);
         ts.currentQuestion = q;
         ts.lastQuestionTime = Date.now();
