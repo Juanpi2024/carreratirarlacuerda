@@ -15,6 +15,9 @@
     <!-- Confetti canvas for victory -->
     <canvas id="confetti-canvas"></canvas>
 
+    <!-- Toast notification container -->
+    <div id="toast-container"></div>
+
     <div id="app-container">
 
         <!-- ========== LOBBY SCREEN ========== -->
@@ -129,6 +132,7 @@
 
             <div id="gameplay-section" class="hidden">
                 <div class="team-header" id="buzzer-team-name">EQUIPO X</div>
+                <div id="buzzer-conn-status" class="buzzer-conn-status conn-connected">🟢 Conectado</div>
                 <!-- Countdown timer bar -->
                 <div id="countdown-container" class="countdown-container hidden">
                     <div id="countdown-bar" class="countdown-fill"></div>
@@ -187,6 +191,16 @@
                     <div class="timeout-icon">⚠️</div>
                     <h2>¡TIEMPO AGOTADO!</h2>
                     <div class="timeout-text">¡CAMBIO DE TURNO!</div>
+                </div>
+
+                <!-- Reconnection overlay -->
+                <div id="reconnect-overlay" class="reconnect-overlay hidden">
+                    <div class="reconnect-content">
+                        <div class="reconnect-spinner"></div>
+                        <h2>Reconectando...</h2>
+                        <p id="reconnect-attempt-text">Intento 1 de 8...</p>
+                        <button class="btn btn-danger btn-small" onclick="cancelReconnect()">Cancelar</button>
+                    </div>
                 </div>
             </div>
         </div>

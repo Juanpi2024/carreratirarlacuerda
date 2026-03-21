@@ -13,6 +13,58 @@ let selectedSubject = 'matematicas'; // Default subject
 const seenQuestions = {};
 
 // ==========================================
+// PEERJS CONFIGURATION — ROBUST FOR SCHOOLS
+// ==========================================
+const PEER_CONFIG = {
+    debug: 1,
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
+            { urls: 'stun:stun.services.mozilla.com' }
+        ],
+        sdpSemantics: 'unified-plan'
+    }
+};
+
+// ==========================================
+// HEARTBEAT / KEEPALIVE SYSTEM
+// ==========================================
+const HEARTBEAT_INTERVAL_MS = 8000;   // Host pings every 8s
+const HEARTBEAT_TIMEOUT_MS = 25000;   // Mark disconnected after 25s no pong
+const BUZZER_HEARTBEAT_TIMEOUT_MS = 30000; // Buzzer reconnects if no ping for 30s
+let heartbeatTimer = null;
+const lastPong = {};    // { teamId: timestamp }
+let lastHostPing = 0;   // Buzzer-side: last ping received from host
+let buzzerHeartbeatChecker = null;
+
+// ==========================================
+// RECONNECTION SYSTEM
+// ==========================================
+const MAX_RECONNECT_ATTEMPTS = 8;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 10000;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let isReconnecting = false;
+let savedRoomCode = '';
+let savedTeamId = '';
+
+// ==========================================
+// CONNECTION STATES
+// ==========================================
+const CONN_STATE = {
+    CONNECTING: 'connecting',
+    CONNECTED: 'connected',
+    DISCONNECTED: 'disconnected',
+    RECONNECTING: 'reconnecting'
+};
+const connectionStates = {}; // { teamId: state }
+
+// ==========================================
 // QUESTION GENERATION (delegated to modules)
 // ==========================================
 function generateQuestion(level, difficulty) {
@@ -51,6 +103,26 @@ const questionTimers = {};
 const QUESTION_TIMEOUT_S = 45;
 
 // ==========================================
+// TOAST NOTIFICATION SYSTEM
+// ==========================================
+function showToast(message, type = 'info', duration = 3500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    const icons = { info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌' };
+    toast.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span><span class="toast-msg">${message}</span>`;
+    container.appendChild(toast);
+    // Trigger animation
+    requestAnimationFrame(() => toast.classList.add('toast-visible'));
+    setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        toast.classList.add('toast-hiding');
+        setTimeout(() => { if (toast.parentNode) toast.remove(); }, 400);
+    }, duration);
+}
+
+// ==========================================
 // SCREEN NAVIGATION
 // ==========================================
 function showScreen(screenId) {
@@ -59,18 +131,31 @@ function showScreen(screenId) {
 }
 
 function goLobby() {
-    if (peer) { peer.destroy(); peer = null; }
+    // Stop heartbeat
+    stopHeartbeat();
+    stopBuzzerHeartbeatChecker();
+    // Stop reconnection
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    isReconnecting = false;
+    reconnectAttempts = 0;
+
+    if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
     role = null;
     connections = {};
+    currentConnection = null;
     // Reset scores and seen questions
     gameStatus = {};
     for (let key in seenQuestions) delete seenQuestions[key];
+    for (let key in connectionStates) delete connectionStates[key];
+    for (let key in lastPong) delete lastPong[key];
     playerCounter = 0;
     // Clear anti-pegado timers
     Object.keys(questionTimers).forEach(k => { clearTimeout(questionTimers[k]); delete questionTimers[k]; });
     // Hide victory
     const vo = document.getElementById('victory-overlay');
     if (vo) { vo.classList.add('hidden'); vo.classList.remove('active'); }
+    // Hide reconnect overlay
+    hideReconnectOverlay();
     showScreen('lobby-screen');
 }
 
@@ -82,6 +167,22 @@ function generateRoomCode() {
     let result = '';
     for (let i = 0; i < 4; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
     return result;
+}
+
+// Sanitize teamId to avoid collisions & problematic chars
+function sanitizeTeamId(rawName, existingIds) {
+    let name = rawName.trim().substring(0, 12);
+    if (!name) name = 'Jugador';
+    // Check if already connected with this name
+    if (existingIds[name] && connections[name]) {
+        // Name taken by an active connection — append suffix
+        let suffix = 2;
+        while (existingIds[`${name}-${suffix}`] && connections[`${name}-${suffix}`]) {
+            suffix++;
+        }
+        name = `${name}-${suffix}`;
+    }
+    return name;
 }
 
 // ==========================================
@@ -101,66 +202,217 @@ async function initHostMode(is1v1 = false) {
     roomCode = generateRoomCode();
     document.getElementById('display-room-code').innerText = roomCode;
 
-    // Removed splitboard logic
-
     // Victory overlay reset
     const vo = document.getElementById('victory-overlay');
     vo.classList.add('hidden');
     vo.classList.remove('active');
 
-    // PeerJS Host
+    // PeerJS Host with robust config
     const hostPeerId = `mathrace-${roomCode}`;
-    peer = new Peer(hostPeerId);
+    peer = new Peer(hostPeerId, PEER_CONFIG);
 
-    peer.on('open', () => console.log('Host ready:', hostPeerId));
+    peer.on('open', () => {
+        console.log('✅ Host ready:', hostPeerId);
+        showToast('Sala creada — esperando alumnos', 'success');
+        // Start heartbeat
+        startHostHeartbeat();
+    });
 
     peer.on('connection', (conn) => {
-        conn.on('open', () => {
-            const tId = conn.metadata.team || 'Jugador';
-            const teamId = tId.trim();
-            // Re-assign metadata to sanitized version
-            conn.metadata.team = teamId;
-            connections[teamId] = conn;
-            // Initialize new player if not exists
-            if (!gameStatus[teamId]) {
-                gameStatus[teamId] = {
-                    score: 0,
-                    currentQuestion: null,
-                    streak: 0,
-                    bestStreak: 0,
-                    incorrect: 0,
-                    totalAnswerTimeMs: 0,
-                    lastQuestionTime: 0,
-                    hasShield: false,
-                    turboCount: 0,
-                    difficultyLevel: 2,
-                    consecutiveWrong: 0,
-                    errorDetails: []
-                };
-                seenQuestions[teamId] = new Set();
-                createPlayerTrack(teamId);
-            }
-            updateConnectionCount();
-            sendQuestionToTeam(teamId);
-            if (!gameStartTime) gameStartTime = Date.now();
-        });
-        conn.on('data', (data) => handleHostData(conn.metadata.team, data));
-        conn.on('close', () => {
-            const tid = conn.metadata.team;
-            delete connections[tid];
-            if (questionTimers[tid]) { clearTimeout(questionTimers[tid]); delete questionTimers[tid]; }
-            updateConnectionCount();
-        });
+        handleNewConnection(conn);
+    });
+
+    peer.on('error', (err) => {
+        console.error('Host PeerJS error:', err);
+        if (err.type === 'unavailable-id') {
+            // Room code collision — regenerate
+            roomCode = generateRoomCode();
+            document.getElementById('display-room-code').innerText = roomCode;
+            showToast('Código de sala en uso, generando nuevo...', 'warning');
+            if (peer) { try { peer.destroy(); } catch(e) {} }
+            const newHostPeerId = `mathrace-${roomCode}`;
+            peer = new Peer(newHostPeerId, PEER_CONFIG);
+            peer.on('open', () => {
+                console.log('✅ Host ready (retry):', newHostPeerId);
+                startHostHeartbeat();
+            });
+            peer.on('connection', (conn) => handleNewConnection(conn));
+            peer.on('error', (e2) => {
+                console.error('Host PeerJS error (retry):', e2);
+                showToast('Error de conexión del host. Intenta de nuevo.', 'error');
+            });
+        } else if (err.type === 'network') {
+            showToast('Error de red — verifica tu conexión a internet', 'error');
+        } else if (err.type === 'server-error') {
+            showToast('Error del servidor PeerJS — reintentando...', 'error');
+        } else {
+            showToast(`Error: ${err.type || 'desconocido'}`, 'error');
+        }
+    });
+
+    peer.on('disconnected', () => {
+        console.warn('Host disconnected from PeerJS server, attempting reconnect...');
+        showToast('Reconectando al servidor...', 'warning');
+        try { peer.reconnect(); } catch(e) { console.error('Reconnect failed:', e); }
     });
 
     // Reset game dynamically
     gameStatus = {};
     for (let key in seenQuestions) delete seenQuestions[key];
+    for (let key in connectionStates) delete connectionStates[key];
+    for (let key in lastPong) delete lastPong[key];
     const lanesContainer = document.getElementById('lanes-container');
     if (lanesContainer) lanesContainer.innerHTML = '';
     playerCounter = 0;
     gameStartTime = null;
     updateAvatars();
+}
+
+function handleNewConnection(conn) {
+    conn.on('open', () => {
+        const rawTeamId = conn.metadata.team || 'Jugador';
+        let teamId = rawTeamId.trim();
+
+        // Check if this is a reconnection (team exists but disconnected)
+        if (gameStatus[teamId] && !connections[teamId]) {
+            // Reconnection! Restore state
+            console.log(`♻️ ${teamId} reconnected!`);
+            connections[teamId] = conn;
+            conn.metadata.team = teamId;
+            connectionStates[teamId] = CONN_STATE.CONNECTED;
+            lastPong[teamId] = Date.now();
+            updateConnectionCount();
+            updateConnectionIndicators();
+            // Resend current question
+            sendQuestionToTeam(teamId);
+            showToast(`${teamId} reconectado ✅`, 'success');
+            showHostNotification('♻️ ¡RECONECTADO!', 'reconnect', teamId);
+            return;
+        }
+
+        // New player — handle duplicate names
+        teamId = sanitizeTeamId(teamId, gameStatus);
+        conn.metadata.team = teamId;
+        connections[teamId] = conn;
+        connectionStates[teamId] = CONN_STATE.CONNECTED;
+        lastPong[teamId] = Date.now();
+
+        // Tell the buzzer their final assigned name
+        conn.send({ type: 'ASSIGNED_NAME', name: teamId });
+
+        // Initialize new player if not exists
+        if (!gameStatus[teamId]) {
+            gameStatus[teamId] = {
+                score: 0,
+                currentQuestion: null,
+                streak: 0,
+                bestStreak: 0,
+                incorrect: 0,
+                totalAnswerTimeMs: 0,
+                lastQuestionTime: 0,
+                hasShield: false,
+                turboCount: 0,
+                difficultyLevel: 2,
+                consecutiveWrong: 0,
+                errorDetails: []
+            };
+            seenQuestions[teamId] = new Set();
+            createPlayerTrack(teamId);
+        }
+        updateConnectionCount();
+        updateConnectionIndicators();
+        sendQuestionToTeam(teamId);
+        if (!gameStartTime) gameStartTime = Date.now();
+        showToast(`${teamId} se unió 🎮`, 'info');
+    });
+
+    conn.on('data', (data) => {
+        const teamId = conn.metadata.team;
+        if (data.type === 'PONG') {
+            lastPong[teamId] = Date.now();
+            if (connectionStates[teamId] !== CONN_STATE.CONNECTED) {
+                connectionStates[teamId] = CONN_STATE.CONNECTED;
+                updateConnectionIndicators();
+            }
+            return;
+        }
+        handleHostData(teamId, data);
+    });
+
+    conn.on('close', () => {
+        const tid = conn.metadata.team;
+        console.warn(`⚠️ ${tid} disconnected`);
+        delete connections[tid];
+        connectionStates[tid] = CONN_STATE.DISCONNECTED;
+        if (questionTimers[tid]) { clearTimeout(questionTimers[tid]); delete questionTimers[tid]; }
+        updateConnectionCount();
+        updateConnectionIndicators();
+    });
+
+    conn.on('error', (err) => {
+        const tid = conn.metadata.team;
+        console.error(`Connection error for ${tid}:`, err);
+        connectionStates[tid] = CONN_STATE.DISCONNECTED;
+        updateConnectionIndicators();
+    });
+}
+
+// ==========================================
+// HOST HEARTBEAT
+// ==========================================
+function startHostHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+        const now = Date.now();
+        for (let teamId in connections) {
+            try {
+                connections[teamId].send({ type: 'PING', t: now });
+            } catch (e) {
+                console.warn(`Failed to ping ${teamId}:`, e);
+            }
+        }
+        // Check for stale connections
+        for (let teamId in lastPong) {
+            if (!connections[teamId]) continue;
+            const elapsed = now - (lastPong[teamId] || 0);
+            if (elapsed > HEARTBEAT_TIMEOUT_MS) {
+                console.warn(`💀 ${teamId} heartbeat timeout (${Math.round(elapsed/1000)}s)`);
+                connectionStates[teamId] = CONN_STATE.DISCONNECTED;
+                updateConnectionIndicators();
+                // Close stale connection gracefully
+                try { connections[teamId].close(); } catch(e) {}
+                delete connections[teamId];
+                updateConnectionCount();
+            }
+        }
+    }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+// ==========================================
+// CONNECTION UI INDICATORS (HOST)
+// ==========================================
+function updateConnectionIndicators() {
+    for (let teamId in gameStatus) {
+        const uiId = gameStatus[teamId].uiId;
+        const laneEl = document.querySelector(`.race-lane[data-team-ui="${uiId}"]`);
+        if (!laneEl) continue;
+        const state = connectionStates[teamId] || CONN_STATE.DISCONNECTED;
+        const indicator = laneEl.querySelector('.conn-indicator');
+        if (indicator) {
+            indicator.className = `conn-indicator conn-${state}`;
+            const labels = {
+                [CONN_STATE.CONNECTED]: '🟢',
+                [CONN_STATE.CONNECTING]: '🟡',
+                [CONN_STATE.RECONNECTING]: '🟡',
+                [CONN_STATE.DISCONNECTED]: '🔴'
+            };
+            indicator.textContent = labels[state] || '⚪';
+        }
+    }
 }
 
 function createPlayerTrack(teamId) {
@@ -175,10 +427,15 @@ function createPlayerTrack(teamId) {
     const container = document.getElementById('lanes-container');
     if (!container) return;
 
+    // Auto-compact mode for many players
+    const totalPlayers = Object.keys(gameStatus).length;
+    const compactClass = totalPlayers > 8 ? 'lane-compact' : '';
+
     const laneDiv = document.createElement('div');
-    laneDiv.className = `race-lane lane-${trackColor}`;
+    laneDiv.className = `race-lane lane-${trackColor} ${compactClass}`;
+    laneDiv.setAttribute('data-team-ui', playerCounter);
     laneDiv.innerHTML = `
-        <div class="lane-label">${teamId} <span id="streak-${playerCounter}" class="streak-badge hidden"></span></div>
+        <div class="lane-label"><span class="conn-indicator conn-connected">🟢</span> ${teamId} <span id="streak-${playerCounter}" class="streak-badge hidden"></span></div>
         <div class="progress-track">
             <div class="progress-fill" id="progress-fill-${playerCounter}" style="background: var(--accent-${trackColor}); box-shadow: 0 0 20px var(--accent-${trackColor});"></div>
             <div class="progress-markers">
@@ -205,11 +462,18 @@ function createPlayerTrack(teamId) {
         <div class="finish-marker">🏁</div>
     `;
     container.appendChild(laneDiv);
+
+    // If we passed the threshold, retroactively compact all lanes
+    if (totalPlayers === 9) {
+        container.querySelectorAll('.race-lane').forEach(l => l.classList.add('lane-compact'));
+    }
 }
 
 function updateConnectionCount() {
     const count = Object.keys(connections).length;
-    document.getElementById('connected-count').innerText = count;
+    const total = Object.keys(gameStatus).length;
+    const el = document.getElementById('connected-count');
+    if (el) el.innerText = `${count}/${total}`;
     // Hide waiting message once at least 1 team connects
     const wm = document.getElementById('waiting-msg');
     if (wm) wm.style.display = count > 0 ? 'none' : 'flex';
@@ -234,8 +498,11 @@ function sendQuestionToTeam(teamId) {
         const answerType = mod ? mod.answerType : 'numeric';
         const payload = { type: 'NEW_QUESTION', text: q.text, timeLimit: QUESTION_TIMEOUT_S, answerType: answerType };
         if (q.options) payload.options = q.options;
-        connections[teamId].send(payload);
-        // Update host split board (eliminado)
+        try {
+            connections[teamId].send(payload);
+        } catch (e) {
+            console.warn(`Failed to send question to ${teamId}:`, e);
+        }
     }
 }
 
@@ -305,15 +572,17 @@ function handleHostData(teamId, data) {
                 setTimeout(() => showHostNotification(`📈 ${diffNames[ts.difficultyLevel] || '¡NIVEL UP!'}`, 'diffup', teamId), notifDelay);
             }
 
-            connections[teamId].send({
-                type: 'CORRECT',
-                streak: ts.streak,
-                turbo: isTurbo,
-                points: points,
-                shieldEarned: shieldEarned,
-                hasShield: ts.hasShield,
-                difficulty: ts.difficultyLevel
-            });
+            try {
+                connections[teamId].send({
+                    type: 'CORRECT',
+                    streak: ts.streak,
+                    turbo: isTurbo,
+                    points: points,
+                    shieldEarned: shieldEarned,
+                    hasShield: ts.hasShield,
+                    difficulty: ts.difficultyLevel
+                });
+            } catch(e) { console.warn('Send CORRECT failed:', e); }
 
             if (ts.score >= WINNING_SCORE) {
                 // VICTORY! Clear all timers
@@ -323,7 +592,9 @@ function handleHostData(teamId, data) {
                 const secs = elapsed % 60;
                 const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-                Object.values(connections).forEach(c => c.send({ type: 'GAME_OVER', winner: teamId }));
+                Object.values(connections).forEach(c => {
+                    try { c.send({ type: 'GAME_OVER', winner: teamId }); } catch(e) {}
+                });
                 showVictory(teamId, timeStr);
 
                 if (typeof sendMetricsToGAS === "function") {
@@ -336,12 +607,12 @@ function handleHostData(teamId, data) {
             // 🛡️ SHIELD: blocks freeze
             if (ts.hasShield) {
                 ts.hasShield = false;
-                connections[teamId].send({ type: 'SHIELD_USED' });
+                try { connections[teamId].send({ type: 'SHIELD_USED' }); } catch(e) {}
                 showHostNotification('🛡️ ¡SALVADO!', 'shield-used', teamId);
                 // No freeze, just send new question
                 sendQuestionToTeam(teamId);
             } else {
-                connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 });
+                try { connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 }); } catch(e) {}
             }
 
             // Log specific error
@@ -432,7 +703,7 @@ function handleQuestionTimeout(teamId) {
     updateStreakDisplay();
     // Notify buzzer
     if (connections[teamId]) {
-        connections[teamId].send({ type: 'TIMEOUT' });
+        try { connections[teamId].send({ type: 'TIMEOUT' }); } catch(e) {}
     }
     // Epic notification on host
     showHostNotification('⚠️ ¡TIEMPO! ¡CAMBIO!', 'timeout', teamId);
@@ -538,7 +809,7 @@ function launchConfetti() {
 }
 
 // ==========================================
-// BUZZER LOGIC
+// BUZZER LOGIC — WITH RECONNECTION
 // ==========================================
 let buzzerTeamId = null;
 
@@ -548,6 +819,7 @@ function initBuzzerMode() {
     document.getElementById('join-section').classList.remove('hidden');
     document.getElementById('gameplay-section').classList.add('hidden');
     document.getElementById('input-room-code').value = '';
+    hideReconnectOverlay();
     setTimeout(() => document.getElementById('input-room-code').focus(), 100);
 }
 
@@ -555,152 +827,322 @@ function joinRoom() {
     const code = document.getElementById('input-room-code').value.toUpperCase();
     const teamInput = document.getElementById('team-selector').value.trim();
 
-    if (code.length !== 4) { alert("El código debe tener 4 caracteres."); return; }
-    if (!teamInput) { alert("Por favor ingresa tu nombre o avatar."); return; }
+    if (code.length !== 4) { showToast("El código debe tener 4 caracteres.", 'warning'); return; }
+    if (!teamInput) { showToast("Por favor ingresa tu nombre.", 'warning'); return; }
 
-    const team = teamInput;
-    buzzerTeamId = team;
+    savedRoomCode = code;
+    savedTeamId = teamInput;
+    buzzerTeamId = teamInput;
+    connectBuzzerToPeer(code, teamInput);
+}
+
+function connectBuzzerToPeer(code, team) {
     const hostPeerId = `mathrace-${code}`;
-    peer = new Peer();
+
+    // Destroy existing peer if any
+    if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
+
+    peer = new Peer(PEER_CONFIG);
 
     peer.on('open', () => {
-        currentConnection = peer.connect(hostPeerId, { metadata: { team: team } });
+        console.log('✅ Buzzer peer ready, connecting to host...');
+        currentConnection = peer.connect(hostPeerId, {
+            metadata: { team: team },
+            reliable: true
+        });
 
         currentConnection.on('open', () => {
+            console.log('✅ Connected to host!');
+            reconnectAttempts = 0;
+            isReconnecting = false;
+            hideReconnectOverlay();
+
             document.getElementById('join-section').classList.add('hidden');
             document.getElementById('gameplay-section').classList.remove('hidden');
             const th = document.getElementById('buzzer-team-name');
             th.innerText = `${team}`;
             th.className = `team-header team-blue-theme`;
+            updateBuzzerConnectionStatus('connected');
+
+            // Start buzzer-side heartbeat checker
+            startBuzzerHeartbeatChecker();
         });
 
-        currentConnection.on('data', (data) => {
-            if (data.type === 'NEW_QUESTION') {
-                document.getElementById('buzzer-question-display').innerText = data.text;
-                clearNum();
-                startBuzzerCountdown(data.timeLimit || QUESTION_TIMEOUT_S);
-                // Switch between numpad and multiple-choice
-                const numpad = document.getElementById('numpad-container');
-                const optionsEl = document.getElementById('options-container');
-                const answerBar = document.querySelector('.answer-bar');
-                if (data.answerType === 'multiple-choice' && data.options) {
-                    numpad.classList.add('hidden');
-                    answerBar.classList.add('hidden');
-                    optionsEl.classList.remove('hidden');
-                    data.options.forEach((opt, i) => {
-                        const el = document.getElementById(`opt-text-${i + 1}`);
-                        if (el) el.innerText = opt;
-                    });
-                } else {
-                    numpad.classList.remove('hidden');
-                    answerBar.classList.remove('hidden');
-                    optionsEl.classList.add('hidden');
-                }
+        currentConnection.on('data', (data) => handleBuzzerData(data));
+
+        currentConnection.on('close', () => {
+            console.warn('⚠️ Connection to host closed');
+            updateBuzzerConnectionStatus('disconnected');
+            attemptReconnect();
+        });
+
+        currentConnection.on('error', (err) => {
+            console.error('Connection error:', err);
+            updateBuzzerConnectionStatus('disconnected');
+            attemptReconnect();
+        });
+    });
+
+    peer.on('error', (err) => {
+        console.error('Buzzer PeerJS error:', err);
+        if (err.type === 'peer-unavailable') {
+            showToast('Sala no encontrada. ¿Está el Host activo?', 'error');
+            if (!isReconnecting) {
+                hideReconnectOverlay();
             }
-            if (data.type === 'CORRECT') {
-                stopBuzzerCountdown();
-                showCorrectFlash();
-                const th = document.getElementById('buzzer-team-name');
-                let headerText = `${buzzerTeamId}`;
-
-                // Show turbo flash
-                if (data.turbo) {
-                    headerText = `⚡ TURBO! +${data.points} ⚡`;
-                    th.style.background = 'linear-gradient(90deg, #ff9100, #ffd700)';
-                    th.style.color = '#000';
-                    setTimeout(() => {
-                        th.style.background = '';
-                        th.style.color = '';
-                    }, 1200);
-                }
-
-                // Show shield earned
-                if (data.shieldEarned) {
-                    setTimeout(() => {
-                        th.innerText = '🛡️ ¡ESCUDO ACTIVADO! 🛡️';
-                        th.style.background = 'linear-gradient(90deg, #00b4ff, #00e5ff)';
-                        th.style.color = '#000';
-                        setTimeout(() => {
-                            th.style.background = '';
-                            th.style.color = '';
-                            th.innerText = `EQUIPO ${buzzerTeamId} 🛡️`;
-                        }, 1500);
-                    }, data.turbo ? 1300 : 0);
-                }
-
-                // Show streak + shield indicator
-                if (data.streak && data.streak >= 2) {
-                    let fires = '🔥';
-                    if (data.streak >= 7) fires = '🔥🔥🔥';
-                    else if (data.streak >= 5) fires = '🔥🔥';
-                    headerText = `${buzzerTeamId} ${fires}×${data.streak}`;
-                    if (data.hasShield) headerText += ' 🛡️';
-                }
-
-                if (!data.turbo && !data.shieldEarned) {
-                    th.innerText = headerText;
-                } else if (!data.shieldEarned) {
-                    th.innerText = headerText;
-                    setTimeout(() => {
-                        let restoreText = `${buzzerTeamId}`;
-                        if (data.streak >= 2) {
-                            let f = '🔥';
-                            if (data.streak >= 7) f = '🔥🔥🔥';
-                            else if (data.streak >= 5) f = '🔥🔥';
-                            restoreText += ` ${f}×${data.streak}`;
-                        }
-                        if (data.hasShield) restoreText += ' 🛡️';
-                        th.innerText = restoreText;
-                    }, 1200);
-                }
+        } else if (err.type === 'network') {
+            showToast('Error de red — verifica tu Wi-Fi', 'error');
+            attemptReconnect();
+        } else if (err.type === 'server-error') {
+            showToast('Error del servidor — reintentando...', 'error');
+            attemptReconnect();
+        } else {
+            if (isReconnecting) {
+                attemptReconnect();
+            } else {
+                showToast(`Error de conexión: ${err.type || 'desconocido'}`, 'error');
             }
-            if (data.type === 'SHIELD_USED') {
-                stopBuzzerCountdown();
-                // Shield blocked the freeze!
-                const th = document.getElementById('buzzer-team-name');
-                th.innerText = '🛡️ ¡ESCUDO USADO! ¡SALVADO! 🛡️';
-                th.style.background = 'linear-gradient(90deg, #39ff14, #00e5ff)';
+        }
+    });
+
+    peer.on('disconnected', () => {
+        console.warn('Buzzer disconnected from PeerJS server');
+        updateBuzzerConnectionStatus('disconnected');
+        attemptReconnect();
+    });
+}
+
+function handleBuzzerData(data) {
+    // Handle heartbeat
+    if (data.type === 'PING') {
+        lastHostPing = Date.now();
+        if (currentConnection) {
+            try { currentConnection.send({ type: 'PONG' }); } catch(e) {}
+        }
+        return;
+    }
+
+    // Handle assigned name (for duplicate resolution)
+    if (data.type === 'ASSIGNED_NAME') {
+        buzzerTeamId = data.name;
+        savedTeamId = data.name;
+        const th = document.getElementById('buzzer-team-name');
+        if (th) th.innerText = data.name;
+        return;
+    }
+
+    if (data.type === 'NEW_QUESTION') {
+        document.getElementById('buzzer-question-display').innerText = data.text;
+        clearNum();
+        startBuzzerCountdown(data.timeLimit || QUESTION_TIMEOUT_S);
+        // Switch between numpad and multiple-choice
+        const numpad = document.getElementById('numpad-container');
+        const optionsEl = document.getElementById('options-container');
+        const answerBar = document.querySelector('.answer-bar');
+        if (data.answerType === 'multiple-choice' && data.options) {
+            numpad.classList.add('hidden');
+            answerBar.classList.add('hidden');
+            optionsEl.classList.remove('hidden');
+            data.options.forEach((opt, i) => {
+                const el = document.getElementById(`opt-text-${i + 1}`);
+                if (el) el.innerText = opt;
+            });
+        } else {
+            numpad.classList.remove('hidden');
+            answerBar.classList.remove('hidden');
+            optionsEl.classList.add('hidden');
+        }
+    }
+    if (data.type === 'CORRECT') {
+        stopBuzzerCountdown();
+        showCorrectFlash();
+        const th = document.getElementById('buzzer-team-name');
+        let headerText = `${buzzerTeamId}`;
+
+        // Show turbo flash
+        if (data.turbo) {
+            headerText = `⚡ TURBO! +${data.points} ⚡`;
+            th.style.background = 'linear-gradient(90deg, #ff9100, #ffd700)';
+            th.style.color = '#000';
+            setTimeout(() => {
+                th.style.background = '';
+                th.style.color = '';
+            }, 1200);
+        }
+
+        // Show shield earned
+        if (data.shieldEarned) {
+            setTimeout(() => {
+                th.innerText = '🛡️ ¡ESCUDO ACTIVADO! 🛡️';
+                th.style.background = 'linear-gradient(90deg, #00b4ff, #00e5ff)';
                 th.style.color = '#000';
                 setTimeout(() => {
                     th.style.background = '';
                     th.style.color = '';
-                    th.innerText = `${buzzerTeamId}`;
-                }, 2000);
-            }
-            if (data.type === 'FREEZE_PENALTY') {
-                stopBuzzerCountdown();
-                applyFreeze(data.seconds);
-            }
-            if (data.type === 'TIMEOUT') {
-                stopBuzzerCountdown();
-                clearNum();
-                const tOverlay = document.getElementById('timeout-overlay');
-                tOverlay.classList.remove('hidden');
-                setTimeout(() => {
-                    tOverlay.classList.add('hidden');
-                }, 2500);
-            }
-            if (data.type === 'GAME_OVER') {
-                stopBuzzerCountdown();
-                const isWinner = data.winner == buzzerTeamId;
-                document.getElementById('buzzer-question-display').innerText =
-                    isWinner ? "🏆 ¡GANASTE! 🏆" : "😓 FIN DEL JUEGO";
-                if (isWinner) {
-                    document.querySelector('.buzzer-question').style.color = '#fbbf24';
+                    th.innerText = `EQUIPO ${buzzerTeamId} 🛡️`;
+                }, 1500);
+            }, data.turbo ? 1300 : 0);
+        }
+
+        // Show streak + shield indicator
+        if (data.streak && data.streak >= 2) {
+            let fires = '🔥';
+            if (data.streak >= 7) fires = '🔥🔥🔥';
+            else if (data.streak >= 5) fires = '🔥🔥';
+            headerText = `${buzzerTeamId} ${fires}×${data.streak}`;
+            if (data.hasShield) headerText += ' 🛡️';
+        }
+
+        if (!data.turbo && !data.shieldEarned) {
+            th.innerText = headerText;
+        } else if (!data.shieldEarned) {
+            th.innerText = headerText;
+            setTimeout(() => {
+                let restoreText = `${buzzerTeamId}`;
+                if (data.streak >= 2) {
+                    let f = '🔥';
+                    if (data.streak >= 7) f = '🔥🔥🔥';
+                    else if (data.streak >= 5) f = '🔥🔥';
+                    restoreText += ` ${f}×${data.streak}`;
                 }
-            }
-        });
+                if (data.hasShield) restoreText += ' 🛡️';
+                th.innerText = restoreText;
+            }, 1200);
+        }
+    }
+    if (data.type === 'SHIELD_USED') {
+        stopBuzzerCountdown();
+        // Shield blocked the freeze!
+        const th = document.getElementById('buzzer-team-name');
+        th.innerText = '🛡️ ¡ESCUDO USADO! ¡SALVADO! 🛡️';
+        th.style.background = 'linear-gradient(90deg, #39ff14, #00e5ff)';
+        th.style.color = '#000';
+        setTimeout(() => {
+            th.style.background = '';
+            th.style.color = '';
+            th.innerText = `${buzzerTeamId}`;
+        }, 2000);
+    }
+    if (data.type === 'FREEZE_PENALTY') {
+        stopBuzzerCountdown();
+        applyFreeze(data.seconds);
+    }
+    if (data.type === 'TIMEOUT') {
+        stopBuzzerCountdown();
+        clearNum();
+        const tOverlay = document.getElementById('timeout-overlay');
+        tOverlay.classList.remove('hidden');
+        setTimeout(() => {
+            tOverlay.classList.add('hidden');
+        }, 2500);
+    }
+    if (data.type === 'GAME_OVER') {
+        stopBuzzerCountdown();
+        stopBuzzerHeartbeatChecker();
+        const isWinner = data.winner == buzzerTeamId;
+        document.getElementById('buzzer-question-display').innerText =
+            isWinner ? "🏆 ¡GANASTE! 🏆" : "😓 FIN DEL JUEGO";
+        if (isWinner) {
+            document.querySelector('.buzzer-question').style.color = '#fbbf24';
+        }
+    }
+}
 
-        currentConnection.on('error', () => {
-            alert("Error de conexión. Verifica el código de sala.");
-            goLobby();
-        });
-    });
+// ==========================================
+// RECONNECTION ENGINE
+// ==========================================
+function attemptReconnect() {
+    if (isReconnecting) return; // Already trying
+    if (!savedRoomCode || !savedTeamId) return; // No saved info to reconnect with
+    if (role !== 'BUZZER') return; // Only buzzers reconnect
 
-    peer.on('error', () => {
-        alert("No se pudo conectar. ¿Está el Host activo?");
-        goLobby();
-    });
+    isReconnecting = true;
+    reconnectAttempts = 0;
+    showReconnectOverlay();
+    doReconnectAttempt();
+}
+
+function doReconnectAttempt() {
+    if (!isReconnecting) return;
+    reconnectAttempts++;
+
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        // Give up after max attempts
+        isReconnecting = false;
+        hideReconnectOverlay();
+        showToast('No se pudo reconectar. Intenta unirte de nuevo.', 'error', 5000);
+        // Show join section so they can retry manually
+        document.getElementById('join-section').classList.remove('hidden');
+        document.getElementById('gameplay-section').classList.add('hidden');
+        return;
+    }
+
+    const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(1.5, reconnectAttempts - 1), RECONNECT_MAX_DELAY_MS);
+    console.log(`🔄 Reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${Math.round(delay)}ms`);
+    updateReconnectOverlay(reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+
+    reconnectTimer = setTimeout(() => {
+        if (!isReconnecting) return;
+        connectBuzzerToPeer(savedRoomCode, savedTeamId);
+    }, delay);
+}
+
+function showReconnectOverlay() {
+    const overlay = document.getElementById('reconnect-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+}
+
+function hideReconnectOverlay() {
+    const overlay = document.getElementById('reconnect-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function updateReconnectOverlay(attempt, max) {
+    const el = document.getElementById('reconnect-attempt-text');
+    if (el) el.innerText = `Intento ${attempt} de ${max}...`;
+}
+
+function cancelReconnect() {
+    isReconnecting = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    hideReconnectOverlay();
+    goLobby();
+}
+
+// ==========================================
+// BUZZER HEARTBEAT CHECKER
+// ==========================================
+function startBuzzerHeartbeatChecker() {
+    stopBuzzerHeartbeatChecker();
+    lastHostPing = Date.now();
+    buzzerHeartbeatChecker = setInterval(() => {
+        const elapsed = Date.now() - lastHostPing;
+        if (elapsed > BUZZER_HEARTBEAT_TIMEOUT_MS) {
+            console.warn(`💀 No host ping for ${Math.round(elapsed/1000)}s, attempting reconnect...`);
+            stopBuzzerHeartbeatChecker();
+            updateBuzzerConnectionStatus('disconnected');
+            attemptReconnect();
+        }
+    }, 5000);
+}
+
+function stopBuzzerHeartbeatChecker() {
+    if (buzzerHeartbeatChecker) { clearInterval(buzzerHeartbeatChecker); buzzerHeartbeatChecker = null; }
+}
+
+// ==========================================
+// BUZZER CONNECTION STATUS INDICATOR
+// ==========================================
+function updateBuzzerConnectionStatus(status) {
+    const indicator = document.getElementById('buzzer-conn-status');
+    if (!indicator) return;
+    const labels = {
+        connected: '🟢 Conectado',
+        disconnected: '🔴 Desconectado',
+        reconnecting: '🟡 Reconectando...'
+    };
+    indicator.textContent = labels[status] || '⚪ Desconocido';
+    indicator.className = `buzzer-conn-status conn-${status}`;
 }
 
 // ==========================================
@@ -727,12 +1169,20 @@ function clearNum() { getAnswerInput().value = ''; }
 function submitAnswer() {
     const inp = getAnswerInput();
     if (!inp.value || !currentConnection) return;
-    currentConnection.send({ type: 'ANSWER_SUBMIT', value: inp.value });
+    try {
+        currentConnection.send({ type: 'ANSWER_SUBMIT', value: inp.value });
+    } catch (e) {
+        showToast('Error al enviar respuesta', 'error');
+    }
 }
 
 function submitOption(num) {
     if (!currentConnection) return;
-    currentConnection.send({ type: 'ANSWER_SUBMIT', value: String(num) });
+    try {
+        currentConnection.send({ type: 'ANSWER_SUBMIT', value: String(num) });
+    } catch (e) {
+        showToast('Error al enviar respuesta', 'error');
+    }
 }
 
 // ==========================================
@@ -752,7 +1202,9 @@ function applyFreeze(seconds) {
         if (remaining <= 0) {
             clearInterval(interval);
             overlay.classList.add('hidden');
-            if (currentConnection) currentConnection.send({ type: 'REQUEST_NEW' });
+            if (currentConnection) {
+                try { currentConnection.send({ type: 'REQUEST_NEW' }); } catch(e) {}
+            }
         }
     }, 1000);
 }

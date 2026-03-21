@@ -2069,3 +2069,256 @@ h3 {
     text-align: center;
     padding: 0.5rem 1rem;
 }
+
+/* ===========================
+   COMPACT RACE LANES (44+ Players)
+   =========================== */
+.race-lane.lane-compact {
+    min-height: 42px;
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+}
+
+.race-lane.lane-compact .lane-label {
+    font-size: 0.7rem;
+    margin-bottom: 0.2rem;
+    letter-spacing: 1px;
+}
+
+.race-lane.lane-compact .progress-track {
+    height: 12px;
+    border-radius: 6px;
+}
+
+.race-lane.lane-compact .lane-runner {
+    transform: scale(0.55);
+    top: -8px;
+}
+
+.race-lane.lane-compact .finish-marker {
+    font-size: 1rem;
+}
+
+.race-lane.lane-compact .streak-badge {
+    font-size: 0.6rem;
+}
+
+/* Adjust race area gap for many players */
+.race-area {
+    gap: 0.5rem;
+}
+
+/* ===========================
+   CONNECTION STATUS INDICATORS
+   =========================== */
+.conn-indicator {
+    font-size: 0.65rem;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.conn-connected .conn-indicator { opacity: 1; }
+.conn-disconnected .conn-indicator { animation: blink-indicator 1s infinite; }
+.conn-reconnecting .conn-indicator { animation: blink-indicator 0.5s infinite; }
+
+@keyframes blink-indicator {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* Buzzer connection status badge */
+.buzzer-conn-status {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    text-align: center;
+    margin: 0.3rem auto;
+    width: fit-content;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+}
+
+.buzzer-conn-status.conn-connected {
+    background: rgba(57, 255, 20, 0.15);
+    color: #39ff14;
+    border: 1px solid rgba(57, 255, 20, 0.3);
+}
+
+.buzzer-conn-status.conn-disconnected {
+    background: rgba(255, 34, 85, 0.15);
+    color: #ff2255;
+    border: 1px solid rgba(255, 34, 85, 0.3);
+    animation: blink-indicator 1s infinite;
+}
+
+.buzzer-conn-status.conn-reconnecting {
+    background: rgba(255, 215, 0, 0.15);
+    color: #ffd700;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    animation: blink-indicator 0.5s infinite;
+}
+
+/* ===========================
+   TOAST NOTIFICATIONS
+   =========================== */
+#toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+    max-width: 350px;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1rem;
+    border-radius: 10px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 0.85rem;
+    color: white;
+    pointer-events: auto;
+    transform: translateX(120%);
+    opacity: 0;
+    transition: transform 0.35s ease, opacity 0.35s ease;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+}
+
+.toast-visible {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.toast-hiding {
+    transform: translateX(120%);
+    opacity: 0;
+}
+
+.toast-info {
+    background: rgba(0, 180, 255, 0.85);
+    border-left: 4px solid #00b4ff;
+}
+
+.toast-success {
+    background: rgba(57, 255, 20, 0.25);
+    border-left: 4px solid #39ff14;
+}
+
+.toast-warning {
+    background: rgba(255, 215, 0, 0.3);
+    border-left: 4px solid #ffd700;
+    color: #ffd700;
+}
+
+.toast-error {
+    background: rgba(255, 34, 85, 0.3);
+    border-left: 4px solid #ff2255;
+    color: #ff8899;
+}
+
+.toast-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.toast-msg {
+    flex: 1;
+    line-height: 1.3;
+}
+
+/* ===========================
+   RECONNECTION OVERLAY
+   =========================== */
+.reconnect-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(5, 10, 24, 0.92);
+    z-index: 9990;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+}
+
+.reconnect-content {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.reconnect-content h2 {
+    font-size: 1.8rem;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 20px var(--accent-cyan);
+}
+
+.reconnect-content p {
+    font-family: 'Roboto', sans-serif;
+    color: var(--text-muted);
+    font-size: 1rem;
+}
+
+.reconnect-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(0, 229, 255, 0.2);
+    border-top: 4px solid var(--accent-cyan);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ===========================
+   LANE EXTRA COLORS (for 44+)
+   =========================== */
+.lane-orange {
+    background: linear-gradient(135deg, rgba(255, 145, 0, 0.08), rgba(255, 145, 0, 0.02));
+    border: 2px solid rgba(255, 145, 0, 0.25);
+    box-shadow: 0 0 15px rgba(255, 145, 0, 0.1);
+}
+
+.lane-orange .lane-label { color: var(--accent-orange); }
+
+.orange-char .char-head { background: radial-gradient(circle at 40% 35%, #ffa040, #ff7b00); }
+.orange-char .char-body { background: linear-gradient(180deg, #ff9100, #cc5500); }
+.orange-char .char-ear { background: #ffa040; }
+
+/* ===========================
+   RESPONSIVE — MOBILE COMPACT
+   =========================== */
+@media (max-width: 600px) {
+    .race-lane.lane-compact {
+        min-height: 35px;
+        padding: 0.2rem 0.5rem;
+    }
+    .race-lane.lane-compact .lane-label {
+        font-size: 0.6rem;
+    }
+    .race-lane.lane-compact .lane-runner {
+        transform: scale(0.45);
+    }
+    #toast-container {
+        right: 0.5rem;
+        left: 0.5rem;
+        max-width: 100%;
+    }
+}
