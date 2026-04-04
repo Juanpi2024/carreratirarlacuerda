@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🚀 Carrera del Conocimiento</title>
+    <title>🪢 Tirar la Cuerda — Duelo de Conocimientos</title>
     <link rel="stylesheet" href="styles.css">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto:wght@400;700&display=swap"
@@ -24,9 +24,9 @@
         <div id="lobby-screen" class="screen active">
             <div class="lobby-bg"></div>
             <div class="lobby-content">
-                <div class="lobby-logo">🚀</div>
-                <h1 class="glitch-title" data-text="CARRERA DEL CONOCIMIENTO">CARRERA DEL CONOCIMIENTO</h1>
-                <h2 class="subtitle">⚡ ¡Aprende Compitiendo! ⚡</h2>
+                <div class="lobby-logo">🪢</div>
+                <h1 class="glitch-title" data-text="TIRAR LA CUERDA">TIRAR LA CUERDA</h1>
+                <h2 class="subtitle">⚡ ¡Duelo de Conocimientos! ⚡</h2>
                 <div class="menu-options">
                     <label class="level-label">📚 Asignatura</label>
                     <select id="subject-selector" class="huge-input level-select" title="Selecciona la asignatura">
@@ -44,12 +44,18 @@
                         <option value="7-8">🔴 7° a 8° Básico</option>
                     </select>
                     <div class="menu-divider"></div>
-                    <button class="btn btn-primary pulse-btn" onclick="initHostMode(false)">🖥️ Pantalla Principal
+                    <button class="btn btn-primary pulse-btn" onclick="initHostMode(false)">🏃 Pantalla Principal
                         (Relevos)</button>
-                    <button class="btn btn-primary pulse-btn" onclick="initHostMode(true)">⚔️ Pantalla Principal (1 vs
-                        1)</button>
+                    <button class="btn btn-primary pulse-btn" onclick="initHostMode(true)">🪢 Pantalla Principal (Tirar
+                        la Cuerda)</button>
                     <div class="menu-divider"></div>
                     <button class="btn btn-secondary" onclick="initBuzzerMode()">📱 Conectar como Equipo</button>
+                    <div class="menu-divider"></div>
+                    <div class="settings-option">
+                        <label class="level-label">🤖 OpenAI Mode (Opcional)</label>
+                        <input type="password" id="openai-key" class="huge-input" placeholder="Ingresa tu API Key de OpenAI" style="font-size: 0.9rem; padding: 0.5rem;">
+                        <p style="font-size: 0.7rem; color: #8892b0; margin-top: 5px;">Tu clave se guarda localmente en este navegador. Nunca se sube a Internet.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -91,9 +97,95 @@
                 </div>
             </div>
 
-            <!-- RACE AREA -->
+            <!-- RACE AREA (Relay mode) -->
             <div class="race-area" id="lanes-container">
                 <!-- Tracks will be injected dynamically -->
+            </div>
+
+            <!-- TUG OF WAR AREA (1 vs 1 mode) -->
+            <div id="tug-of-war-area" class="hidden">
+                <div class="tow-layout">
+                    <!-- Team 1 Calculator (Left) -->
+                    <div class="tow-calculator-container left-side">
+                        <div class="host-calculator theme-blue" id="host-calc-1">
+                            <div class="hc-header">EQUIPO 1</div>
+                            <div class="hc-screen">
+                                <div class="hc-question" id="hc-q-1">?</div>
+                                <div class="hc-input" id="hc-i-1">...</div>
+                            </div>
+                            <div class="hc-numpad">
+                                <div>1</div><div>2</div><div>3</div>
+                                <div>4</div><div>5</div><div>6</div>
+                                <div>7</div><div>8</div><div>9</div>
+                                <div class="hc-key-x">X</div><div>0</div><div class="hc-key-ok">✓</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Animation Center -->
+                    <div class="tow-animation-center">
+                        <div class="tow-timer" id="tow-main-timer">00:00</div>
+                        
+                        <!-- Score Progress Bar -->
+                        <div class="tow-score-bar">
+                            <div class="tow-score-label tow-score-left" id="tow-score-left">🔵 0%</div>
+                            <div class="tow-score-track">
+                                <div class="tow-score-fill-left" id="tow-fill-left"></div>
+                                <div class="tow-score-fill-right" id="tow-fill-right"></div>
+                                <div class="tow-score-center-mark"></div>
+                            </div>
+                            <div class="tow-score-label tow-score-right" id="tow-score-right">0% 🔴</div>
+                        </div>
+
+                        <div class="tow-rope-container" id="tow-rope-container">
+                            <div id="tow-rope" class="tow-rope">
+                                <div class="rope-center-ribbon"></div>
+                                
+                                <!-- Team 1 Character -->
+                                <div class="tow-character-anchor anchor-1" id="tow-char-1">
+                                    <div class="runner-character blue-char">
+                                        <div class="char-ear char-ear-l"></div><div class="char-ear char-ear-r"></div>
+                                        <div class="char-head"><div class="char-eye eye-l"></div><div class="char-eye eye-r"></div><div class="char-mouth"></div></div>
+                                        <div class="char-body"></div>
+                                        <div class="char-legs"><div class="char-leg leg-l"></div><div class="char-leg leg-r"></div></div>
+                                    </div>
+                                </div>
+
+                                <!-- Team 2 Character -->
+                                <div class="tow-character-anchor anchor-2" id="tow-char-2">
+                                    <div class="runner-character pink-char">
+                                        <div class="char-ear char-ear-l"></div><div class="char-ear char-ear-r"></div>
+                                        <div class="char-head"><div class="char-eye eye-l"></div><div class="char-eye eye-r"></div><div class="char-mouth"></div></div>
+                                        <div class="char-body"></div>
+                                        <div class="char-legs"><div class="char-leg leg-l"></div><div class="char-leg leg-r"></div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tow-ground-stage"></div>
+                        <div class="tow-center-line"></div>
+                        
+                        <!-- Tension indicator -->
+                        <div class="tow-tension-text hidden" id="tow-tension-text">⚡ ¡TENSIÓN! ⚡</div>
+                    </div>
+
+                    <!-- Team 2 Calculator (Right) -->
+                    <div class="tow-calculator-container right-side">
+                        <div class="host-calculator theme-pink" id="host-calc-2">
+                            <div class="hc-header">EQUIPO 2</div>
+                            <div class="hc-screen">
+                                <div class="hc-question" id="hc-q-2">?</div>
+                                <div class="hc-input" id="hc-i-2">...</div>
+                            </div>
+                            <div class="hc-numpad">
+                                <div>1</div><div>2</div><div>3</div>
+                                <div>4</div><div>5</div><div>6</div>
+                                <div>7</div><div>8</div><div>9</div>
+                                <div class="hc-key-x">X</div><div>0</div><div class="hc-key-ok">✓</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Waiting message -->
@@ -112,6 +204,8 @@
                     <button class="btn btn-primary btn-big pulse-btn" onclick="goLobby()">🔄 REVANCHA</button>
                 </div>
             </div>
+            <!-- Demo/Test Button (for internal testing) -->
+            <button id="demo-btn" class="demo-test-btn hidden" onclick="startDemoMode()">🧪 DEMO</button>
             <!-- Host epic notifications -->
             <div id="host-notifications"></div>
         </div>
@@ -120,8 +214,8 @@
         <div id="buzzer-screen" class="screen">
             <div id="join-section">
                 <div class="join-card">
-                    <div class="join-icon">🎮</div>
-                    <h2>Unirse a la Carrera</h2>
+                    <div class="join-icon">🪢</div>
+                    <h2>Unirse al Duelo</h2>
                     <input type="text" id="input-room-code" class="huge-input" placeholder="CÓDIGO" maxlength="4"
                         style="text-transform:uppercase" autocomplete="off">
                     <input type="text" id="team-selector" class="huge-input" placeholder="Tu Nombre (Ej: Juan)" maxlength="12" autocomplete="off" style="text-align: center; margin-top: 10px;">

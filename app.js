@@ -8,9 +8,27 @@ let connections = {};
 let currentConnection = null;
 let selectedLevel = '3-4'; // Default level
 let selectedSubject = 'matematicas'; // Default subject
+let isTugOfWar = false;
+let towTeamAssign = {}; // { teamId: 1 or 2 }
+let towRopePos = 0; // -100 to 100
+const TOW_PULL_STRENGTH = 8; // % pull per correct answer
+let towTimerInterval = null;
 
 // Anti-repetition: tracks question hashes seen by each team
 const seenQuestions = {};
+let openAIKey = localStorage.getItem('openai_key') || '';
+
+window.addEventListener('DOMContentLoaded', () => {
+    const keyInput = document.getElementById('openai-key');
+    if (keyInput) {
+        keyInput.value = openAIKey;
+        keyInput.addEventListener('change', (e) => {
+            openAIKey = e.target.value.trim();
+            localStorage.setItem('openai_key', openAIKey);
+            showToast('OpenAI Key guardada localmente', 'success');
+        });
+    }
+});
 
 // ==========================================
 // PEERJS CONFIGURATION — ROBUST FOR SCHOOLS
@@ -89,6 +107,45 @@ function getUniqueQuestion(teamId) {
     return q;
 }
 
+async function getUniqueQuestionAsync(teamId) {
+    if (openAIKey) {
+        const q = await generateOpenAIQuestion(selectedLevel, selectedSubject);
+        if (q) return q;
+    }
+    return getUniqueQuestion(teamId);
+}
+
+async function generateOpenAIQuestion(level, subject) {
+    const prompt = `Actúa como un profesor experto en ${subject} para nivel escolar ${level}. 
+    Genera UNA pregunta educativa donde la respuesta sea un NÚMERO ENTERO.
+    Sé creativo, usa problemas divertidos.
+    IMPORTANTE: Responde SOLO con el JSON: {"text": "la pregunta", "answer": 42}
+    No incluyas nada más en la respuesta.`;
+
+    try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openAIKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.8
+            })
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        const json = JSON.parse(data.choices[0].message.content.trim());
+        return json;
+    } catch (e) {
+        console.error("Error OpenAI:", e);
+        showToast("Error Generando con IA, usando generador local", "warning");
+        return null;
+    }
+}
+
 const WINNING_SCORE = 10;
 const TURBO_TIME_MS = 3000;
 const SHIELD_STREAK = 5;
@@ -131,6 +188,10 @@ function showScreen(screenId) {
 }
 
 function goLobby() {
+    // Stop demo mode
+    if (typeof stopDemoMode === 'function') stopDemoMode();
+    // Stop TOW timer
+    if (towTimerInterval) { clearInterval(towTimerInterval); towTimerInterval = null; }
     // Stop heartbeat
     stopHeartbeat();
     stopBuzzerHeartbeatChecker();
@@ -258,18 +319,48 @@ async function initHostMode(is1v1 = false) {
 
     // Reset game dynamically
     gameStatus = {};
+    isTugOfWar = is1v1;
+    towTeamAssign = {};
+    towRopePos = 0;
+
     for (let key in seenQuestions) delete seenQuestions[key];
     for (let key in connectionStates) delete connectionStates[key];
     for (let key in lastPong) delete lastPong[key];
+    
     const lanesContainer = document.getElementById('lanes-container');
-    if (lanesContainer) lanesContainer.innerHTML = '';
+    const towArea = document.getElementById('tug-of-war-area');
+    
+    if (isTugOfWar) {
+        if (lanesContainer) lanesContainer.classList.add('hidden');
+        if (towArea) towArea.classList.remove('hidden');
+        document.getElementById('tow-rope').style.transform = 'translateX(0%)';
+        document.getElementById('tow-main-timer').innerText = '00:00';
+        // Reset score bar
+        updateTOWScoreBar();
+        // Show demo button
+        const demoBtn = document.getElementById('demo-btn');
+        if (demoBtn) demoBtn.classList.remove('hidden');
+        // Reset calc headers
+        const h1 = document.querySelector('#host-calc-1 .hc-header');
+        const h2 = document.querySelector('#host-calc-2 .hc-header');
+        if (h1) h1.innerText = 'EQUIPO 1';
+        if (h2) h2.innerText = 'EQUIPO 2';
+    } else {
+        if (lanesContainer) {
+            lanesContainer.classList.remove('hidden');
+            lanesContainer.innerHTML = '';
+        }
+        if (towArea) towArea.classList.add('hidden');
+        const demoBtn = document.getElementById('demo-btn');
+        if (demoBtn) demoBtn.classList.add('hidden');
+    }
+
     playerCounter = 0;
     gameStartTime = null;
-    updateAvatars();
 }
 
 function handleNewConnection(conn) {
-    conn.on('open', () => {
+    conn.on('open', async () => {
         const rawTeamId = conn.metadata.team || 'Jugador';
         let teamId = rawTeamId.trim();
 
@@ -284,7 +375,7 @@ function handleNewConnection(conn) {
             updateConnectionCount();
             updateConnectionIndicators();
             // Resend current question
-            sendQuestionToTeam(teamId);
+            await sendQuestionToTeam(teamId);
             showToast(`${teamId} reconectado ✅`, 'success');
             showHostNotification('♻️ ¡RECONECTADO!', 'reconnect', teamId);
             return;
@@ -297,7 +388,7 @@ function handleNewConnection(conn) {
         connectionStates[teamId] = CONN_STATE.CONNECTED;
         lastPong[teamId] = Date.now();
 
-        // Tell the buzzer their final assigned name
+        // Tell the buzzer their final assigned name and team number
         conn.send({ type: 'ASSIGNED_NAME', name: teamId });
 
         // Initialize new player if not exists
@@ -317,16 +408,41 @@ function handleNewConnection(conn) {
                 errorDetails: []
             };
             seenQuestions[teamId] = new Set();
-            createPlayerTrack(teamId);
+            
+            if (isTugOfWar) {
+                // Alternar equipos 1 y 2
+                const pCount = Object.keys(gameStatus).length;
+                const assignedTeam = (pCount % 2 === 0) ? 2 : 1;
+                towTeamAssign[teamId] = assignedTeam;
+                gameStatus[teamId].uiId = assignedTeam;
+                showToast(`${teamId} asignado al EQUIPO ${assignedTeam}`, 'info');
+                
+                // Tell buzzer which team they are on
+                conn.send({ type: 'TEAM_ASSIGNED', teamNum: assignedTeam });
+                
+                // Actualizar encabezados
+                const hName = document.getElementById(`host-calc-${assignedTeam}`).querySelector('.hc-header');
+                if (hName) hName.innerText = teamId.toUpperCase();
+
+                // Hide demo button once real players join
+                const demoBtn = document.getElementById('demo-btn');
+                if (demoBtn) demoBtn.classList.add('hidden');
+            } else {
+                createPlayerTrack(teamId);
+            }
         }
         updateConnectionCount();
         updateConnectionIndicators();
-        sendQuestionToTeam(teamId);
-        if (!gameStartTime) gameStartTime = Date.now();
+        await sendQuestionToTeam(teamId);
+        
+        if (!gameStartTime) {
+            gameStartTime = Date.now();
+            if (isTugOfWar) startTOWTimer();
+        }
         showToast(`${teamId} se unió 🎮`, 'info');
     });
 
-    conn.on('data', (data) => {
+    conn.on('data', async (data) => {
         const teamId = conn.metadata.team;
         if (data.type === 'PONG') {
             lastPong[teamId] = Date.now();
@@ -336,7 +452,7 @@ function handleNewConnection(conn) {
             }
             return;
         }
-        handleHostData(teamId, data);
+        await handleHostData(teamId, data);
     });
 
     conn.on('close', () => {
@@ -398,19 +514,25 @@ function stopHeartbeat() {
 function updateConnectionIndicators() {
     for (let teamId in gameStatus) {
         const uiId = gameStatus[teamId].uiId;
-        const laneEl = document.querySelector(`.race-lane[data-team-ui="${uiId}"]`);
-        if (!laneEl) continue;
         const state = connectionStates[teamId] || CONN_STATE.DISCONNECTED;
-        const indicator = laneEl.querySelector('.conn-indicator');
-        if (indicator) {
-            indicator.className = `conn-indicator conn-${state}`;
-            const labels = {
-                [CONN_STATE.CONNECTED]: '🟢',
-                [CONN_STATE.CONNECTING]: '🟡',
-                [CONN_STATE.RECONNECTING]: '🟡',
-                [CONN_STATE.DISCONNECTED]: '🔴'
-            };
-            indicator.textContent = labels[state] || '⚪';
+        const labels = {
+            [CONN_STATE.CONNECTED]: '🟢',
+            [CONN_STATE.CONNECTING]: '🟡',
+            [CONN_STATE.RECONNECTING]: '🟡',
+            [CONN_STATE.DISCONNECTED]: '🔴'
+        };
+        const icon = labels[state] || '⚪';
+
+        if (isTugOfWar) {
+            // No hay indicador visual por ahora en TOW mode o podríamos ponerlo en los nombres
+        } else {
+            const laneEl = document.querySelector(`.race-lane[data-team-ui="${uiId}"]`);
+            if (!laneEl) continue;
+            const indicator = laneEl.querySelector('.conn-indicator');
+            if (indicator) {
+                indicator.className = `conn-indicator conn-${state}`;
+                indicator.textContent = icon;
+            }
         }
     }
 }
@@ -474,30 +596,53 @@ function updateConnectionCount() {
     const total = Object.keys(gameStatus).length;
     const el = document.getElementById('connected-count');
     if (el) el.innerText = `${count}/${total}`;
+    
     // Hide waiting message once at least 1 team connects
     const wm = document.getElementById('waiting-msg');
-    if (wm) wm.style.display = count > 0 ? 'none' : 'flex';
+    if (wm) {
+        if (isTugOfWar) {
+            wm.style.display = count >= 2 ? 'none' : 'flex';
+        } else {
+            wm.style.display = count > 0 ? 'none' : 'flex';
+        }
+    }
 }
 
 function updateScoreDisplay() {
     // Ya no actualizamos `#score-1` o `#score-2` porque se eliminaron
 }
 
-function sendQuestionToTeam(teamId) {
+async function sendQuestionToTeam(teamId) {
     if (connections[teamId]) {
+        if (isTugOfWar) {
+            const teamNum = towTeamAssign[teamId];
+            const qEl = document.getElementById(`hc-q-${teamNum}`);
+            if (qEl) qEl.innerText = "Pensando... 🧠";
+        }
+
         const ts = gameStatus[teamId];
-        const q = getUniqueQuestion(teamId);
+        const q = await getUniqueQuestionAsync(teamId);
         ts.currentQuestion = q;
         ts.lastQuestionTime = Date.now();
         // Clear existing anti-pegado timer
         if (questionTimers[teamId]) clearTimeout(questionTimers[teamId]);
         // Start new anti-pegado timer
         questionTimers[teamId] = setTimeout(() => handleQuestionTimeout(teamId), QUESTION_TIMEOUT_S * 1000);
+        
         // Get answer type from module
         const mod = window.QuestionModules[selectedSubject];
         const answerType = mod ? mod.answerType : 'numeric';
         const payload = { type: 'NEW_QUESTION', text: q.text, timeLimit: QUESTION_TIMEOUT_S, answerType: answerType };
         if (q.options) payload.options = q.options;
+        
+        if (isTugOfWar) {
+            const teamNum = towTeamAssign[teamId];
+            const qEl = document.getElementById(`hc-q-${teamNum}`);
+            if (qEl) qEl.innerText = q.text;
+            const iEl = document.getElementById(`hc-i-${teamNum}`);
+            if (iEl) iEl.innerText = '_';
+        }
+
         try {
             connections[teamId].send(payload);
         } catch (e) {
@@ -506,10 +651,10 @@ function sendQuestionToTeam(teamId) {
     }
 }
 
-function handleHostData(teamId, data) {
+async function handleHostData(teamId, data) {
     if (data.type === 'REQUEST_NEW') {
         if (questionTimers[teamId]) { clearTimeout(questionTimers[teamId]); delete questionTimers[teamId]; }
-        sendQuestionToTeam(teamId);
+        await sendQuestionToTeam(teamId);
         return;
     }
     if (data.type === 'ANSWER_SUBMIT') {
@@ -544,9 +689,36 @@ function handleHostData(teamId, data) {
 
             // 🛡️ SHIELD: earned at streak 5
             let shieldEarned = false;
-            if (ts.streak === SHIELD_STREAK && !ts.hasShield) {
+            if (ts.streak === SHIELD_STREAK) {
                 ts.hasShield = true;
                 shieldEarned = true;
+            }
+
+            if (isTugOfWar) {
+                const teamNum = towTeamAssign[teamId];
+                const iEl = document.getElementById(`hc-i-${teamNum}`);
+                if (iEl) iEl.innerText = data.value;
+                
+                const calc = document.getElementById(`host-calc-${teamNum}`);
+                if (calc) {
+                    calc.classList.add('hc-correct-anim');
+                    setTimeout(() => calc.classList.remove('hc-correct-anim'), 500);
+                }
+
+                // Efecto de tirar la cuerda
+                const pull = (teamNum === 1) ? -TOW_PULL_STRENGTH : TOW_PULL_STRENGTH;
+                towRopePos = Math.max(-100, Math.min(100, towRopePos + pull));
+                
+                // Trigger pull animation on BOTH characters
+                const anchor1 = document.getElementById('tow-char-1');
+                const anchor2 = document.getElementById('tow-char-2');
+                if (teamNum === 1 && anchor1) {
+                    anchor1.classList.add('pulling');
+                    setTimeout(() => anchor1.classList.remove('pulling'), 400);
+                } else if (teamNum === 2 && anchor2) {
+                    anchor2.classList.add('pulling');
+                    setTimeout(() => anchor2.classList.remove('pulling'), 400);
+                }
             }
 
             updateAvatars();
@@ -584,7 +756,9 @@ function handleHostData(teamId, data) {
                 });
             } catch(e) { console.warn('Send CORRECT failed:', e); }
 
-            if (ts.score >= WINNING_SCORE) {
+            const isWinner = isTugOfWar ? (Math.abs(towRopePos) >= 100) : (ts.score >= WINNING_SCORE);
+
+            if (isWinner) {
                 // VICTORY! Clear all timers
                 Object.keys(questionTimers).forEach(k => { clearTimeout(questionTimers[k]); delete questionTimers[k]; });
                 const elapsed = gameStartTime ? Math.round((Date.now() - gameStartTime) / 1000) : 0;
@@ -601,7 +775,7 @@ function handleHostData(teamId, data) {
                     sendMetricsToGAS(teamId, timeStr);
                 }
             } else {
-                sendQuestionToTeam(teamId);
+                await sendQuestionToTeam(teamId);
             }
         } else {
             // 🛡️ SHIELD: blocks freeze
@@ -610,7 +784,7 @@ function handleHostData(teamId, data) {
                 try { connections[teamId].send({ type: 'SHIELD_USED' }); } catch(e) {}
                 showHostNotification('🛡️ ¡SALVADO!', 'shield-used', teamId);
                 // No freeze, just send new question
-                sendQuestionToTeam(teamId);
+                await sendQuestionToTeam(teamId);
             } else {
                 try { connections[teamId].send({ type: 'FREEZE_PENALTY', seconds: 3 }); } catch(e) {}
             }
@@ -634,20 +808,118 @@ function handleHostData(teamId, data) {
                 showHostNotification('📉 NIVEL AJUSTADO', 'diffdown', teamId);
             }
             updateStreakDisplay();
+            
+            if (isTugOfWar) {
+                // En TOW una mala respuesta tira hacia el otro lado un poquito
+                const teamNum = towTeamAssign[teamId];
+                const pullBack = (teamNum === 1) ? (TOW_PULL_STRENGTH/2) : -(TOW_PULL_STRENGTH/2);
+                towRopePos = Math.max(-100, Math.min(100, towRopePos + pullBack));
+                updateAvatars();
+
+                const calc = document.getElementById(`host-calc-${teamNum}`);
+                if (calc) {
+                    calc.classList.add('hc-wrong-anim');
+                    setTimeout(() => calc.classList.remove('hc-wrong-anim'), 400);
+                }
+
+                // Mostrar respuesta fallida en el host
+                const iEl = document.getElementById(`hc-i-${teamNum}`);
+                if (iEl) {
+                    iEl.innerText = data.value || 'X';
+                    iEl.style.color = '#ef4444';
+                    setTimeout(() => {
+                        iEl.style.color = '';
+                        iEl.innerText = '_';
+                    }, 1000);
+                }
+            }
         }
     }
 }
 
 function updateAvatars() {
-    for (let teamId in gameStatus) {
-        const ts = gameStatus[teamId];
-        const uiId = ts.uiId;
-        const p = Math.min((ts.score / WINNING_SCORE) * 100, 100);
-        const avatarEl = document.getElementById(`avatar-${uiId}`);
-        const fillEl = document.getElementById(`progress-fill-${uiId}`);
-        if (avatarEl) avatarEl.style.left = `${2 + p * 0.85}%`;
-        if (fillEl) fillEl.style.width = `${p}%`;
+    if (isTugOfWar) {
+        const rope = document.getElementById('tow-rope');
+        if (rope) {
+            // ropePos: -100 (team 1 wins) to +100 (team 2 wins)
+            // Map to a reasonable percentage movement (max ±35%)
+            const movePercent = towRopePos * 0.35;
+            rope.style.transform = `translateX(${movePercent}%)`;
+        }
+        
+        // Update score bar
+        updateTOWScoreBar();
+        
+        // Tension indicator when close to winning
+        const tensionEl = document.getElementById('tow-tension-text');
+        if (tensionEl) {
+            if (Math.abs(towRopePos) >= 70) {
+                tensionEl.classList.remove('hidden');
+                if (towRopePos <= -70) {
+                    tensionEl.innerText = '⚡ ¡EQUIPO 1 CASI GANA! ⚡';
+                    tensionEl.style.color = 'var(--accent-blue)';
+                } else {
+                    tensionEl.innerText = '⚡ ¡EQUIPO 2 CASI GANA! ⚡';
+                    tensionEl.style.color = 'var(--accent-pink)';
+                }
+            } else {
+                tensionEl.classList.add('hidden');
+            }
+        }
+        
+        // Add rope tension visual (red glow near victory)
+        const ropeContainer = document.getElementById('tow-rope-container');
+        if (ropeContainer) {
+            if (Math.abs(towRopePos) >= 80) {
+                ropeContainer.classList.add('rope-critical');
+            } else if (Math.abs(towRopePos) >= 60) {
+                ropeContainer.classList.add('rope-tense');
+                ropeContainer.classList.remove('rope-critical');
+            } else {
+                ropeContainer.classList.remove('rope-tense', 'rope-critical');
+            }
+        }
+    } else {
+        for (let teamId in gameStatus) {
+            const ts = gameStatus[teamId];
+            const uiId = ts.uiId;
+            const p = Math.min((ts.score / WINNING_SCORE) * 100, 100);
+            const avatarEl = document.getElementById(`avatar-${uiId}`);
+            const fillEl = document.getElementById(`progress-fill-${uiId}`);
+            if (avatarEl) avatarEl.style.left = `${2 + p * 0.85}%`;
+            if (fillEl) fillEl.style.width = `${p}%`;
+        }
     }
+}
+
+function updateTOWScoreBar() {
+    const leftFill = document.getElementById('tow-fill-left');
+    const rightFill = document.getElementById('tow-fill-right');
+    const leftLabel = document.getElementById('tow-score-left');
+    const rightLabel = document.getElementById('tow-score-right');
+    if (!leftFill || !rightFill) return;
+    
+    // towRopePos: negative = team 1 winning, positive = team 2 winning
+    const team1Pct = Math.max(0, Math.round(-towRopePos));
+    const team2Pct = Math.max(0, Math.round(towRopePos));
+    
+    leftFill.style.width = `${team1Pct / 2}%`;
+    rightFill.style.width = `${team2Pct / 2}%`;
+    
+    if (leftLabel) leftLabel.innerText = `🔵 ${team1Pct}%`;
+    if (rightLabel) rightLabel.innerText = `${team2Pct}% 🔴`;
+}
+
+function startTOWTimer() {
+    if (towTimerInterval) clearInterval(towTimerInterval);
+    const start = Date.now();
+    towTimerInterval = setInterval(() => {
+        const elapsed = Math.round((Date.now() - start) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const el = document.getElementById('tow-main-timer');
+        if (el) el.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }, 1000);
 }
 
 // ==========================================
@@ -708,7 +980,7 @@ function handleQuestionTimeout(teamId) {
     // Epic notification on host
     showHostNotification('⚠️ ¡TIEMPO! ¡CAMBIO!', 'timeout', teamId);
     // Send new question after a brief delay
-    setTimeout(() => { sendQuestionToTeam(teamId); }, 2500);
+    setTimeout(async () => { await sendQuestionToTeam(teamId); }, 2500);
 }
 
 function showVictory(teamId, timeStr) {
@@ -716,7 +988,16 @@ function showVictory(teamId, timeStr) {
     vo.classList.remove('hidden');
     vo.classList.add('active');
     document.getElementById('victory-text').innerText = '🎉 ¡VICTORIA! 🎉';
-    document.getElementById('victory-team').innerText = `${teamId} gana en ${timeStr}`;
+    
+    let winnerName = teamId;
+    if (isTugOfWar) {
+        const teamNum = towTeamAssign[teamId];
+        const hName = document.getElementById(`host-calc-${teamNum}`).querySelector('.hc-header');
+        if (hName) winnerName = hName.innerText;
+        else winnerName = `EQUIPO ${teamNum}`;
+    }
+
+    document.getElementById('victory-team').innerText = `${winnerName} gana en ${timeStr}`;
     launchConfetti();
 
     // Build post-race summary
@@ -928,6 +1209,18 @@ function handleBuzzerData(data) {
         savedTeamId = data.name;
         const th = document.getElementById('buzzer-team-name');
         if (th) th.innerText = data.name;
+        return;
+    }
+
+    // Handle team assignment (1 or 2)
+    if (data.type === 'TEAM_ASSIGNED') {
+        const teamNum = data.teamNum;
+        const th = document.getElementById('buzzer-team-name');
+        if (th) {
+            th.className = `team-header team-${teamNum === 1 ? 'blue' : 'pink'}-theme`;
+            th.innerText = `${buzzerTeamId} — EQUIPO ${teamNum}`;
+        }
+        showToast(`Asignado al Equipo ${teamNum}`, teamNum === 1 ? 'info' : 'success');
         return;
     }
 
@@ -1270,4 +1563,190 @@ function stopBuzzerCountdown() {
     if (container) container.classList.add('hidden');
     if (bar) { bar.style.width = '100%'; bar.style.transition = 'none'; bar.className = 'countdown-fill'; }
     if (urgentEl) { urgentEl.classList.add('hidden'); urgentEl.classList.remove('countdown-critical-num'); }
+}
+
+// ==========================================
+// DEMO / TEST MODE (Internal Testing)
+// ==========================================
+let demoInterval = null;
+let demoRunning = false;
+
+function startDemoMode() {
+    if (demoRunning) {
+        stopDemoMode();
+        return;
+    }
+    
+    demoRunning = true;
+    const demoBtn = document.getElementById('demo-btn');
+    if (demoBtn) {
+        demoBtn.innerText = '⏹ PARAR DEMO';
+        demoBtn.classList.add('demo-active');
+    }
+    
+    // Read selected level and subject
+    const levelSelect = document.getElementById('level-selector');
+    if (levelSelect) selectedLevel = levelSelect.value;
+    const subjectSelect = document.getElementById('subject-selector');
+    if (subjectSelect) selectedSubject = subjectSelect.value;
+
+    // Set up fake teams
+    const team1Name = 'DemoAzul';
+    const team2Name = 'DemoRosa';
+    
+    if (!gameStatus[team1Name]) {
+        gameStatus[team1Name] = {
+            score: 0, currentQuestion: null, streak: 0, bestStreak: 0,
+            incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0,
+            hasShield: false, turboCount: 0, difficultyLevel: 2,
+            consecutiveWrong: 0, errorDetails: [], uiId: 1
+        };
+        seenQuestions[team1Name] = new Set();
+        towTeamAssign[team1Name] = 1;
+    }
+    if (!gameStatus[team2Name]) {
+        gameStatus[team2Name] = {
+            score: 0, currentQuestion: null, streak: 0, bestStreak: 0,
+            incorrect: 0, totalAnswerTimeMs: 0, lastQuestionTime: 0,
+            hasShield: false, turboCount: 0, difficultyLevel: 2,
+            consecutiveWrong: 0, errorDetails: [], uiId: 2
+        };
+        seenQuestions[team2Name] = new Set();
+        towTeamAssign[team2Name] = 2;
+    }
+    
+    // Update headers
+    const h1 = document.querySelector('#host-calc-1 .hc-header');
+    const h2 = document.querySelector('#host-calc-2 .hc-header');
+    if (h1) h1.innerText = team1Name.toUpperCase();
+    if (h2) h2.innerText = team2Name.toUpperCase();
+    
+    // Hide waiting msg
+    const wm = document.getElementById('waiting-msg');
+    if (wm) wm.style.display = 'none';
+    
+    if (!gameStartTime) {
+        gameStartTime = Date.now();
+        startTOWTimer();
+    }
+    
+    showToast('🧪 Modo Demo iniciado — simulando partida', 'success');
+    
+    // Generate initial questions
+    demoShowQuestion(team1Name, 1);
+    demoShowQuestion(team2Name, 2);
+    
+    // Simulate game at random intervals
+    let turnCounter = 0;
+    demoInterval = setInterval(() => {
+        if (!demoRunning) return;
+        
+        turnCounter++;
+        const activeTeamName = turnCounter % 2 === 1 ? team1Name : team2Name;
+        const teamNum = towTeamAssign[activeTeamName];
+        const isCorrect = Math.random() > 0.35; // 65% chance correct
+        
+        const ts = gameStatus[activeTeamName];
+        if (!ts.currentQuestion) {
+            ts.currentQuestion = getUniqueQuestion(activeTeamName);
+        }
+        
+        const calc = document.getElementById(`host-calc-${teamNum}`);
+        
+        if (isCorrect) {
+            const answerMs = Math.floor(Math.random() * 5000) + 1000;
+            ts.totalAnswerTimeMs += answerMs;
+            
+            const isTurbo = answerMs < TURBO_TIME_MS;
+            const points = isTurbo ? 2 : 1;
+            ts.score += points;
+            if (isTurbo) ts.turboCount += 1;
+            ts.streak += 1;
+            ts.consecutiveWrong = 0;
+            if (ts.streak > ts.bestStreak) ts.bestStreak = ts.streak;
+            
+            // Pull rope
+            const pull = (teamNum === 1) ? -TOW_PULL_STRENGTH : TOW_PULL_STRENGTH;
+            towRopePos = Math.max(-100, Math.min(100, towRopePos + pull));
+            
+            // Show on calc
+            const iEl = document.getElementById(`hc-i-${teamNum}`);
+            if (iEl) iEl.innerText = ts.currentQuestion.answer;
+            
+            if (calc) {
+                calc.classList.add('hc-correct-anim');
+                setTimeout(() => calc.classList.remove('hc-correct-anim'), 500);
+            }
+            
+            // Pull animation
+            const anchor = document.getElementById(`tow-char-${teamNum}`);
+            if (anchor) {
+                anchor.classList.add('pulling');
+                setTimeout(() => anchor.classList.remove('pulling'), 400);
+            }
+            
+            // Notifications
+            if (isTurbo) showHostNotification('⚡ ¡TURBO! +2 ⚡', 'turbo', activeTeamName);
+            if (ts.streak >= 3 && ts.streak % 2 === 1) {
+                showHostNotification(`🔥 ¡RACHA ×${ts.streak}!`, 'streak', activeTeamName);
+            }
+        } else {
+            ts.streak = 0;
+            ts.incorrect += 1;
+            ts.consecutiveWrong += 1;
+            
+            // Pull back
+            const pullBack = (teamNum === 1) ? (TOW_PULL_STRENGTH / 2) : -(TOW_PULL_STRENGTH / 2);
+            towRopePos = Math.max(-100, Math.min(100, towRopePos + pullBack));
+            
+            if (calc) {
+                calc.classList.add('hc-wrong-anim');
+                setTimeout(() => calc.classList.remove('hc-wrong-anim'), 400);
+            }
+            
+            const iEl = document.getElementById(`hc-i-${teamNum}`);
+            if (iEl) {
+                iEl.innerText = 'X';
+                iEl.style.color = '#ef4444';
+                setTimeout(() => { iEl.style.color = ''; iEl.innerText = '_'; }, 800);
+            }
+        }
+        
+        updateAvatars();
+        
+        // Generate new question
+        demoShowQuestion(activeTeamName, teamNum);
+        
+        // Check victory
+        if (Math.abs(towRopePos) >= 100) {
+            const winner = towRopePos <= -100 ? team1Name : team2Name;
+            const elapsed = gameStartTime ? Math.round((Date.now() - gameStartTime) / 1000) : 0;
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            showVictory(winner, `${mins}:${secs.toString().padStart(2, '0')}`);
+            stopDemoMode();
+        }
+        
+    }, 1800); // Every 1.8 seconds
+}
+
+function demoShowQuestion(teamName, teamNum) {
+    const q = getUniqueQuestion(teamName);
+    gameStatus[teamName].currentQuestion = q;
+    gameStatus[teamName].lastQuestionTime = Date.now();
+    
+    const qEl = document.getElementById(`hc-q-${teamNum}`);
+    if (qEl) qEl.innerText = q.text;
+    const iEl = document.getElementById(`hc-i-${teamNum}`);
+    if (iEl) iEl.innerText = '_';
+}
+
+function stopDemoMode() {
+    demoRunning = false;
+    if (demoInterval) { clearInterval(demoInterval); demoInterval = null; }
+    const demoBtn = document.getElementById('demo-btn');
+    if (demoBtn) {
+        demoBtn.innerText = '🧪 DEMO';
+        demoBtn.classList.remove('demo-active');
+    }
 }
