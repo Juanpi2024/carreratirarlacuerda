@@ -137,7 +137,7 @@
                             <div class="tow-score-label tow-score-right" id="tow-score-right">0% 🔴</div>
                         </div>
 
-                        <div class="tow-rope-container" id="tow-rope-container">
+                        <div class="tow-rope-container" id="tow-rope-container" style="opacity: 0; pointer-events: none;">
                             <div id="tow-rope" class="tow-rope">
                                 <div class="rope-center-ribbon"></div>
                                 
@@ -302,6 +302,10 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Three.js + CSS3DRenderer para el efecto 3D pedido -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS3DRenderer.js"></script>
+    <script src="3d_scene.js"></script>
     <script src="gas_connector.js"></script>
     <script src="questions/matematicas.js"></script>
     <script src="questions/lenguaje.js"></script>

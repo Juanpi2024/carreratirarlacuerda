@@ -335,6 +335,7 @@ async function initHostMode(is1v1 = false) {
         if (towArea) towArea.classList.remove('hidden');
         document.getElementById('tow-rope').style.transform = 'translateX(0%)';
         document.getElementById('tow-main-timer').innerText = '00:00';
+        if (typeof init3DScene === 'function') init3DScene();
         // Reset score bar
         updateTOWScoreBar();
         // Show demo button
@@ -708,6 +709,7 @@ async function handleHostData(teamId, data) {
                 // Efecto de tirar la cuerda
                 const pull = (teamNum === 1) ? -TOW_PULL_STRENGTH : TOW_PULL_STRENGTH;
                 towRopePos = Math.max(-100, Math.min(100, towRopePos + pull));
+                window.towRopePos = towRopePos; // Make available for 3D scene
                 
                 // Trigger pull animation on BOTH characters
                 const anchor1 = document.getElementById('tow-char-1');
@@ -715,9 +717,11 @@ async function handleHostData(teamId, data) {
                 if (teamNum === 1 && anchor1) {
                     anchor1.classList.add('pulling');
                     setTimeout(() => anchor1.classList.remove('pulling'), 400);
+                    if (typeof trigger3DPull === 'function') trigger3DPull(1);
                 } else if (teamNum === 2 && anchor2) {
                     anchor2.classList.add('pulling');
                     setTimeout(() => anchor2.classList.remove('pulling'), 400);
+                    if (typeof trigger3DPull === 'function') trigger3DPull(2);
                 }
             }
 

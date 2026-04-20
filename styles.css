@@ -2699,4 +2699,26 @@ h3 {
     border-color: var(--accent-pink);
     color: var(--accent-pink);
     text-shadow: 0 0 10px var(--accent-pink);
+}
+/* ===== 3D GLASSMORPHISM FOR CALCULATORS (TUG OF WAR) ===== */
+.tow-calculator-container .host-calculator {
+    background: rgba(10, 15, 30, 0.4) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(255, 255, 255, 0.05) !important;
+    transform-style: preserve-3d;
+    transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    position: relative;
+    z-index: 10;
+}
+
+#three-canvas-container {
+    opacity: 1 !important;
+    animation: fadeIn3D 2s ease-out;
+}
+
+@keyframes fadeIn3D {
+    0% { opacity: 0; transform: scale(1.05); }
+    100% { opacity: 1; transform: scale(1); }
 }
