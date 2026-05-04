@@ -81,6 +81,27 @@ const CONN_STATE = {
     RECONNECTING: 'reconnecting'
 };
 const connectionStates = {}; // { teamId: state }
+const MAX_TEAM_NAME_LENGTH = 12;
+
+function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
+
+function normalizeAnswer(value) {
+    const raw = String(value ?? '').trim();
+    if (!/^-?\d+$/.test(raw)) return NaN;
+    return Number.parseInt(raw, 10);
+}
+
+function formatSubmittedAnswer(value) {
+    return Number.isNaN(value) ? 'Nada' : String(value);
+}
 
 // ==========================================
 // QUESTION GENERATION (delegated to modules)
@@ -168,7 +189,13 @@ function showToast(message, type = 'info', duration = 3500) {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     const icons = { info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌' };
-    toast.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span><span class="toast-msg">${message}</span>`;
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.textContent = icons[type] || 'ℹ️';
+    const msg = document.createElement('span');
+    msg.className = 'toast-msg';
+    msg.textContent = message;
+    toast.append(icon, msg);
     container.appendChild(toast);
     // Trigger animation
     requestAnimationFrame(() => toast.classList.add('toast-visible'));
@@ -232,7 +259,12 @@ function generateRoomCode() {
 
 // Sanitize teamId to avoid collisions & problematic chars
 function sanitizeTeamId(rawName, existingIds) {
-    let name = rawName.trim().substring(0, 12);
+    let name = String(rawName || '')
+        .normalize('NFKC')
+        .replace(/[\u0000-\u001f\u007f<>`"']/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, MAX_TEAM_NAME_LENGTH);
     if (!name) name = 'Jugador';
     // Check if already connected with this name
     if (existingIds[name] && connections[name]) {
@@ -322,6 +354,7 @@ async function initHostMode(is1v1 = false) {
     isTugOfWar = is1v1;
     towTeamAssign = {};
     towRopePos = 0;
+    window.towRopePos = towRopePos;
 
     for (let key in seenQuestions) delete seenQuestions[key];
     for (let key in connectionStates) delete connectionStates[key];
@@ -557,8 +590,9 @@ function createPlayerTrack(teamId) {
     const laneDiv = document.createElement('div');
     laneDiv.className = `race-lane lane-${trackColor} ${compactClass}`;
     laneDiv.setAttribute('data-team-ui', playerCounter);
+    const safeTeamId = escapeHTML(teamId);
     laneDiv.innerHTML = `
-        <div class="lane-label"><span class="conn-indicator conn-connected">🟢</span> ${teamId} <span id="streak-${playerCounter}" class="streak-badge hidden"></span></div>
+        <div class="lane-label"><span class="conn-indicator conn-connected">🟢</span> ${safeTeamId} <span id="streak-${playerCounter}" class="streak-badge hidden"></span></div>
         <div class="progress-track">
             <div class="progress-fill" id="progress-fill-${playerCounter}" style="background: var(--accent-${trackColor}); box-shadow: 0 0 20px var(--accent-${trackColor});"></div>
             <div class="progress-markers">
@@ -663,8 +697,8 @@ async function handleHostData(teamId, data) {
         if (questionTimers[teamId]) { clearTimeout(questionTimers[teamId]); delete questionTimers[teamId]; }
         const ts = gameStatus[teamId];
         if (!ts || !ts.currentQuestion) return;
-        const correct = ts.currentQuestion.answer;
-        const submitted = parseInt(data.value);
+        const correct = Number(ts.currentQuestion.answer);
+        const submitted = normalizeAnswer(data.value);
 
         if (submitted === correct) {
             // Track answer time
@@ -818,6 +852,7 @@ async function handleHostData(teamId, data) {
                 const teamNum = towTeamAssign[teamId];
                 const pullBack = (teamNum === 1) ? (TOW_PULL_STRENGTH/2) : -(TOW_PULL_STRENGTH/2);
                 towRopePos = Math.max(-100, Math.min(100, towRopePos + pullBack));
+                window.towRopePos = towRopePos;
                 updateAvatars();
 
                 const calc = document.getElementById(`host-calc-${teamNum}`);
@@ -962,7 +997,13 @@ function showHostNotification(text, type, teamId) {
     const notif = document.createElement('div');
     const uiId = gameStatus[teamId] ? gameStatus[teamId].uiId : 0;
     notif.className = `host-notif notif-${type} notif-team-${uiId}`;
-    notif.innerHTML = `<span class="notif-team">${teamId}</span><span class="notif-text">${text}</span>`;
+    const team = document.createElement('span');
+    team.className = 'notif-team';
+    team.textContent = teamId;
+    const msg = document.createElement('span');
+    msg.className = 'notif-text';
+    msg.textContent = text;
+    notif.append(team, msg);
     container.appendChild(notif);
     setTimeout(() => { if (notif.parentNode) notif.remove(); }, 3500);
 }
@@ -1014,9 +1055,10 @@ function showVictory(teamId, timeStr) {
             const accuracy = total > 0 ? Math.round((ts.score / total) * 100) : 0;
             const avgTime = ts.score > 0 ? (ts.totalAnswerTimeMs / ts.score / 1000).toFixed(1) : '—';
             const isWinner = tId == teamId;
+            const safeTeamName = escapeHTML(tId);
             html += `
                 <div class="summary-card ${isWinner ? 'summary-winner' : ''} ${ts.uiId % 2 === 0 ? 'card-blue' : 'card-pink'}">
-                    <div class="summary-team">${isWinner ? '🏆 ' : ''}${tId}</div>
+                    <div class="summary-team">${isWinner ? '🏆 ' : ''}${safeTeamName}</div>
                     <div class="summary-stats">
                         <div class="stat-row"><span class="stat-label">✅ Correctas</span><span class="stat-value">${ts.score}</span></div>
                         <div class="stat-row" style="cursor: pointer;" onclick="document.getElementById('report-${ts.uiId}').classList.toggle('hidden')"><span class="stat-label">❌ Incorrectas (Click Ver Detalles)</span><span class="stat-value">${ts.incorrect}</span></div>
@@ -1028,8 +1070,8 @@ function showVictory(teamId, timeStr) {
                     <div id="report-${ts.uiId}" class="error-report hidden">
                         ${ts.errorDetails.length > 0 ? ts.errorDetails.map(err =>
                 `<div class="error-item">
-                                <b>P:</b> ${err.question}<br>
-                                Su respuesta: <span style="color:#ff4444">${err.submitted || 'Nada'}</span> | Correcta: <span style="color:#39ff14">${err.expected}</span><br>
+                                <b>P:</b> ${escapeHTML(err.question)}<br>
+                                Su respuesta: <span style="color:#ff4444">${escapeHTML(formatSubmittedAnswer(err.submitted))}</span> | Correcta: <span style="color:#39ff14">${escapeHTML(err.expected)}</span><br>
                                 <small>⏱️ Tardó ${(err.timeSpentMs / 1000).toFixed(1)}s</small>
                             </div>`
             ).join('') : '<i>¡Perfecto! No hubo errores.</i>'}
@@ -1110,7 +1152,7 @@ function initBuzzerMode() {
 
 function joinRoom() {
     const code = document.getElementById('input-room-code').value.toUpperCase();
-    const teamInput = document.getElementById('team-selector').value.trim();
+    const teamInput = sanitizeTeamId(document.getElementById('team-selector').value, {});
 
     if (code.length !== 4) { showToast("El código debe tener 4 caracteres.", 'warning'); return; }
     if (!teamInput) { showToast("Por favor ingresa tu nombre.", 'warning'); return; }
@@ -1672,6 +1714,7 @@ function startDemoMode() {
             // Pull rope
             const pull = (teamNum === 1) ? -TOW_PULL_STRENGTH : TOW_PULL_STRENGTH;
             towRopePos = Math.max(-100, Math.min(100, towRopePos + pull));
+            window.towRopePos = towRopePos;
             
             // Show on calc
             const iEl = document.getElementById(`hc-i-${teamNum}`);
@@ -1702,6 +1745,7 @@ function startDemoMode() {
             // Pull back
             const pullBack = (teamNum === 1) ? (TOW_PULL_STRENGTH / 2) : -(TOW_PULL_STRENGTH / 2);
             towRopePos = Math.max(-100, Math.min(100, towRopePos + pullBack));
+            window.towRopePos = towRopePos;
             
             if (calc) {
                 calc.classList.add('hc-wrong-anim');

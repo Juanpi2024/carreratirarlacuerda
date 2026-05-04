@@ -1,6 +1,6 @@
 // 3D Scene Controller
 let scene, camera, renderer, cssRenderer;
-let ropeMesh, char1Params, char2Params;
+let ropeMesh, ribbonMesh, char1Params, char2Params;
 let particles = [];
 let tow3dEnabled = false;
 
@@ -58,11 +58,11 @@ function init3DScene() {
     const ropeGeo = new THREE.CylinderGeometry(0.15, 0.15, 20, 16);
     ropeGeo.rotateZ(Math.PI / 2);
     // Use an epic glowing material for the rope
-    const ropeMat = new THREE.MeshStandardMaterial({ 
-        color: 0xe0e0e0, 
-        roughness: 0.8,
-        metalness: 0.2,
-        emissive: 0x222222 
+    const ropeMat = new THREE.MeshStandardMaterial({
+        color: 0xd7a45a,
+        roughness: 0.9,
+        metalness: 0.05,
+        emissive: 0x3a2108
     });
     ropeMesh = new THREE.Mesh(ropeGeo, ropeMat);
     scene.add(ropeMesh);
@@ -71,34 +71,32 @@ function init3DScene() {
     const ribbonGeo = new THREE.TorusGeometry(0.3, 0.1, 8, 24);
     ribbonGeo.rotateY(Math.PI / 2);
     const ribbonMat = new THREE.MeshStandardMaterial({ color: 0xff3333, emissive: 0xaa0000 });
-    const ribbonMesh = new THREE.Mesh(ribbonGeo, ribbonMat);
+    ribbonMesh = new THREE.Mesh(ribbonGeo, ribbonMat);
     ropeMesh.add(ribbonMesh);
 
-    // Team 1 Avatar (3D Geometric Crystal/Sphere)
-    const geo1 = new THREE.IcosahedronGeometry(1.5, 1);
-    const mat1 = new THREE.MeshStandardMaterial({ 
-        color: 0x00bfff, 
-        emissive: 0x0055ff, 
-        emissiveIntensity: 0.4,
-        wireframe: true 
+    const char1 = createChildAvatar({
+        shirt: 0x12b7ff,
+        shorts: 0x174ea6,
+        shoes: 0xffffff,
+        hair: 0x3b2416,
+        skin: 0xf2bf8f,
+        direction: 1
     });
-    const char1 = new THREE.Mesh(geo1, mat1);
     char1.position.set(-8, 0, 0);
     scene.add(char1);
-    char1Params = { mesh: char1, basePos: -8 };
+    char1Params = { mesh: char1, basePos: -8, team: 1 };
 
-    // Team 2 Avatar 
-    const geo2 = new THREE.IcosahedronGeometry(1.5, 1);
-    const mat2 = new THREE.MeshStandardMaterial({ 
-        color: 0xff00ff, 
-        emissive: 0xaa00aa,
-        emissiveIntensity: 0.4,
-        wireframe: true 
+    const char2 = createChildAvatar({
+        shirt: 0xff4db8,
+        shorts: 0x7c1f74,
+        shoes: 0xffffff,
+        hair: 0x171717,
+        skin: 0xd79a68,
+        direction: -1
     });
-    const char2 = new THREE.Mesh(geo2, mat2);
     char2.position.set(8, 0, 0);
     scene.add(char2);
-    char2Params = { mesh: char2, basePos: 8 };
+    char2Params = { mesh: char2, basePos: 8, team: 2 };
 
     // Create particles for tension effect
     createParticles();
@@ -107,6 +105,66 @@ function init3DScene() {
     
     window.addEventListener('resize', onWindowResize);
     animate3D();
+}
+
+function makeMat(color, emissive = 0x000000, emissiveIntensity = 0.05) {
+    return new THREE.MeshStandardMaterial({
+        color,
+        emissive,
+        emissiveIntensity,
+        roughness: 0.72,
+        metalness: 0.02
+    });
+}
+
+function addMesh(group, geometry, material, position, rotation = [0, 0, 0], scale = [1, 1, 1]) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(...position);
+    mesh.rotation.set(...rotation);
+    mesh.scale.set(...scale);
+    group.add(mesh);
+    return mesh;
+}
+
+function createChildAvatar({ shirt, shorts, shoes, hair, skin, direction }) {
+    const child = new THREE.Group();
+    child.scale.set(1.05, 1.05, 1.05);
+    child.rotation.z = direction === 1 ? -0.18 : 0.18;
+
+    const skinMat = makeMat(skin, 0x2b1205, 0.04);
+    const shirtMat = makeMat(shirt, shirt, 0.18);
+    const shortsMat = makeMat(shorts, shorts, 0.08);
+    const hairMat = makeMat(hair);
+    const shoeMat = makeMat(shoes);
+    const darkMat = makeMat(0x111827);
+
+    addMesh(child, new THREE.SphereGeometry(0.62, 32, 24), skinMat, [0, 1.9, 0]);
+    addMesh(child, new THREE.SphereGeometry(0.66, 32, 16), hairMat, [0, 2.18, -0.05], [0.05, 0, 0], [1, 0.55, 1]);
+    addMesh(child, new THREE.SphereGeometry(0.08, 12, 8), darkMat, [-0.18 * direction, 1.95, 0.58]);
+    addMesh(child, new THREE.SphereGeometry(0.08, 12, 8), darkMat, [0.18 * direction, 1.95, 0.58]);
+    addMesh(child, new THREE.TorusGeometry(0.16, 0.018, 8, 16), darkMat, [0, 1.76, 0.6], [Math.PI / 2, 0, 0]);
+
+    addMesh(child, new THREE.CylinderGeometry(0.5, 0.62, 1.1, 24), shirtMat, [0, 0.72, 0], [0, 0, 0]);
+    addMesh(child, new THREE.BoxGeometry(0.95, 0.42, 0.62), shortsMat, [0, -0.05, 0]);
+
+    const armRotZ = direction === 1 ? -0.95 : 0.95;
+    addMesh(child, new THREE.CylinderGeometry(0.12, 0.12, 1.35, 16), skinMat, [0.55 * direction, 0.95, 0.2], [0.12, 0, armRotZ]);
+    addMesh(child, new THREE.CylinderGeometry(0.12, 0.12, 1.25, 16), skinMat, [0.72 * direction, 0.55, 0.1], [0.18, 0, armRotZ]);
+    addMesh(child, new THREE.SphereGeometry(0.19, 16, 12), skinMat, [1.15 * direction, 0.18, 0.08]);
+    addMesh(child, new THREE.SphereGeometry(0.16, 16, 12), skinMat, [1.0 * direction, -0.06, 0.08]);
+
+    addMesh(child, new THREE.CylinderGeometry(0.15, 0.15, 0.95, 16), skinMat, [-0.24, -0.72, 0], [0.22, 0, -0.15]);
+    addMesh(child, new THREE.CylinderGeometry(0.15, 0.15, 0.95, 16), skinMat, [0.28, -0.72, 0], [0.22, 0, 0.24]);
+    addMesh(child, new THREE.BoxGeometry(0.52, 0.18, 0.32), shoeMat, [-0.34, -1.23, 0.15], [0, 0, -0.1]);
+    addMesh(child, new THREE.BoxGeometry(0.52, 0.18, 0.32), shoeMat, [0.44, -1.2, 0.15], [0, 0, 0.12]);
+
+    const labelGeo = new THREE.TorusGeometry(0.44, 0.035, 8, 24);
+    const label = new THREE.Mesh(labelGeo, makeMat(shirt, shirt, 0.4));
+    label.position.set(0, 0.95, 0.36);
+    label.rotation.set(Math.PI / 2, 0, 0);
+    child.add(label);
+
+    return child;
 }
 
 function createParticles() {
@@ -154,9 +212,9 @@ function update3DPositions(towPosPercent) {
     
     // Tension scale
     const tension = Math.abs(towPosPercent) / 100;
-    // Add pulsing based on tension!
-    char1Params.mesh.material.emissiveIntensity = 0.4 + tension;
-    char2Params.mesh.material.emissiveIntensity = 0.4 + tension;
+    char1Params.mesh.rotation.z = -0.18 - tension * 0.2;
+    char2Params.mesh.rotation.z = 0.18 + tension * 0.2;
+    ropeMesh.material.emissiveIntensity = 0.08 + tension * 0.35;
 }
 
 // A pulse effect when a team pulls
@@ -177,15 +235,11 @@ function animate3D() {
     const time = performance.now() * 0.001;
 
     // Gentle float
-    ropeMesh.position.y = Math.sin(time * 2) * 0.2;
-    char1Params.mesh.position.y = ropeMesh.position.y;
-    char2Params.mesh.position.y = ropeMesh.position.y;
-
-    // Gentle rotation of avatars
-    char1Params.mesh.rotation.x += 0.01;
-    char1Params.mesh.rotation.y += 0.015;
-    char2Params.mesh.rotation.x -= 0.01;
-    char2Params.mesh.rotation.y += 0.015;
+    ropeMesh.position.y = Math.sin(time * 2) * 0.08;
+    char1Params.mesh.position.y = ropeMesh.position.y - 0.05;
+    char2Params.mesh.position.y = ropeMesh.position.y - 0.05;
+    char1Params.mesh.position.z = Math.sin(time * 5) * 0.04;
+    char2Params.mesh.position.z = Math.cos(time * 5) * 0.04;
 
     // Particles subtle movement
     particles.forEach(p => {
